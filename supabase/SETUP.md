@@ -2,25 +2,34 @@
 
 Project: `jyclvsljxzszxjhpmsab` at `https://jyclvsljxzszxjhpmsab.supabase.co`.
 
-## Configured September 5, 2026
+## Active Cloudflare deployment
 
-- The supplied publishable key was verified without printing it. It is stored in ignored local `.dev.vars` and in Sites runtime configuration, outside source control.
+- Game: https://prairie-air.extremecode-767.workers.dev
+- Worker: `prairie-air` in the owner's Cloudflare account.
+- Deployment version: `b7188315-00a2-4f7a-a696-92d374c0601c`.
+- `COUNTY_STORAGE=supabase` is active. The Worker has no D1 binding.
+- Both supplied keys were verified without printing them. They are stored in Cloudflare Worker secrets and ignored local `.dev.vars` (mode 0600). The server secret is absent from compiled code, browser assets, and the deployment configuration. `/api/auth/config` intentionally returns only the project URL and publishable key.
 - Email/password sign-in and email confirmation are enabled. The project uses ES256 signing keys.
-- Site URL: `https://prairie-air.nschroed1.chatgpt.site`.
-- Allowed redirects: `https://prairie-air.nschroed1.chatgpt.site/auth` and `https://prairie-air.nschroed1.chatgpt.site/auth?view=reset`.
-- `migrations/202609050001_prairie_county.sql` was applied using the signed-in project SQL editor. All three tables have RLS enabled, and browser roles cannot write them. This migration is now immutable; append new migrations for changes.
-- Account screens, server JWT verification, and a Supabase storage adapter are implemented in the source. This source has not yet replaced the live ChatGPT-login build.
+- Supabase Site URL is the Cloudflare game origin. Exactly six allowed redirects are configured: `/auth` and `/auth?view=reset` on the Cloudflare origin, the old `https://prairie-air.nschroed1.chatgpt.site` origin, and `http://localhost:3000`.
+- `migrations/202609050001_prairie_county.sql` was applied using the signed-in project SQL editor. All three tables have RLS enabled; browser roles cannot access them or invoke transaction functions directly. This migration is immutable; append new migrations for changes.
 
-## Required before activation
+## Data transition
 
-1. Configure custom SMTP under Authentication → Emails → SMTP Settings. Supabase's default test sender cannot deliver general public signup/reset emails. Use a verified sender domain and enter SMTP credentials directly in Supabase. Keep email confirmation enabled.
-2. Supply a server-only `sb_secret_…` key through secure local/server configuration. It belongs only in `SUPABASE_SECRET_KEY`, never the browser configuration route or a `NEXT_PUBLIC_` variable. No admin secret has been obtained or stored yet.
-3. Export and retain the existing D1 pilot, claim, and payout records. Import them in that order into the corresponding `prairie_*` tables, verify row counts and financial totals, and arrange explicit linking of existing ChatGPT pilot records to verified Supabase accounts. Do not match accounts by unverified email or award duplicate starting balances.
-4. During a short pause in county writes, repeat/verify the final import, then set `COUNTY_STORAGE=supabase` and deploy the validated saved source. Failures must not silently fall back to a separate D1 economy.
-5. Test a real signup, confirmation, sign-in, password reset, sign-out, and two-player contract claim. No emails or production test accounts have been created by the agent. Browser auth and email delivery remain unverified.
+Immediately before Cloudflare activation, all three live Sites/D1 tables (`pilots`, `field_claims`, `payouts`) and the corresponding Supabase tables contained zero rows. There were no saved careers, claims, or payouts to migrate or link. The initial read-only D1 snapshot is retained locally under ignored `.wrangler/backups/d1-before-cloudflare.json`.
 
-The current live build and D1 data have not been changed. The new Supabase tables are empty. Until activation, `COUNTY_STORAGE=d1` is set in Sites runtime configuration. The public key and URL are intentionally returned by `/api/auth/config`; the secret key is never returned.
+The old Sites deployment is still available with its separate D1 database and ChatGPT login. It has not been redirected or changed. Share the Cloudflare URL for the Supabase county. If records are later imported from the old host, use an explicit account-linking process and prevent duplicate payouts; do not match accounts by unverified email.
+
+## Remaining: public signup email
+
+Custom SMTP is still disabled. Supabase's default test sender cannot deliver signup/reset emails to the general public. Supply a sender domain and email provider, then configure Authentication → Emails → SMTP Settings with the provider's credentials. Keep email confirmation enabled.
+
+Hosting, password authentication, and gameplay storage are active, but public email registration and password-reset delivery are not ready. No signup or reset emails have been sent or tested. Once SMTP is configured, test signup, confirmation, and password recovery in the browser, including the PKCE same-browser return flow. A custom game domain can be added separately, with corresponding auth redirects.
 
 ## Validation
 
-`tests/auth.test.ts` verifies real signed and tampered JWTs against a local fixture JWKS, including project/audience/role/expiry checks. `tests/supabase-store.test.ts` runs the migration and transaction functions in PGlite (Postgres), checking permissions, claims, leases, stale revisions, once-only payouts, and admission limits. PGlite serializes queries and does not replace multi-connection production load testing. Existing D1 and simulation tests continue to pass.
+- Cloudflare production build and Wrangler deployment dry run passed; deployment completed successfully.
+- Native HTTP checks returned 200 for `/`, `/auth`, `/api/auth/config`, and `/api/county`. The county returned all 60 contracts. Missing or forged authentication returns 401 for game writes.
+- Two temporary, email-confirmed QA users were created through the admin API without sending email. Both signed in with email/password, joined the same live county, and appeared in shared presence. Simultaneous claims produced one success and one 409 conflict, with a single visible owner. An incomplete contract could not earn a payout. Both users signed out and all their auth and gameplay records were deleted afterward.
+- Anonymous and authenticated clients were denied direct access to private pilot records. Only server-mediated commands can update gameplay data.
+- The existing 24 unit/integration checks cover simulation, D1 transactions, signed/tampered JWTs, and Postgres migration/functions using PGlite. PGlite serializes queries and does not replace production load testing. The live two-user test additionally exercised real concurrent Supabase transactions.
+- Local play remains available at http://localhost:3000/. Its default county storage remains local D1 unless explicitly changed; solo practice stays device-local. Browser gameplay/visual testing and email delivery remain unverified.

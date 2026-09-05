@@ -2,6 +2,8 @@
 
 A Three.js crop-dusting game set in a shared Iowa county. Public pilots compete for a finite seasonal pool of farm contracts and appear in each other's skies and field maps.
 
+Play: https://prairie-air.extremecode-767.workers.dev. The Cloudflare/Supabase backend is active; public signup and password-reset emails still need custom SMTP configuration. Solo practice is available without an account.
+
 ## Public county
 
 - One shared county, capped at 32 connected pilots in this alpha; this is an admission limit, not a load-tested capacity claim.
@@ -10,7 +12,7 @@ A Three.js crop-dusting game set in a shared Iowa county. Public pilots compete 
 - Server-simulated flight, coverage, upgrades, and payments. Input packets are constrained by server time. The client does not submit a trusted position, cash balance, payout, or coverage score.
 - Seasonal standings rank earnings, then precision. Previous-season standings remain visible. Careers, aircraft upgrades, and cash carry over; seasonal scores reset. All upgrade levels compete together in this alpha.
 - Free flight remains available when contracts are finished or awaiting their next scheduled wave.
-- Supabase handles email/password accounts, email verification, and password reset. The API verifies signed access tokens, their project, audience, and role before accepting player commands. Only a hashed pilot ID and editable callsign appear publicly; account email is not exposed. Existing ChatGPT pilot records are retained and require an explicit account-linking migration before they can be used by a new email account.
+- Supabase handles email/password accounts, email verification, and password reset. The API verifies signed access tokens, their project, audience, and role before accepting player commands. Only a hashed pilot ID and editable callsign appear publicly; account email is not exposed. The old ChatGPT-login database was empty at activation; any future legacy imports require explicit account linking.
 - Solo practice retains the original three repeatable contracts and device-local career. Practice progress never enters the public economy or rankings.
 
 ## Run locally
@@ -23,7 +25,7 @@ npx wrangler d1 execute DB --local --config wrangler.local.json --file drizzle/0
 npm run dev
 ```
 
-Apply the initial local migration once to an empty database. Additional migrations must be applied in order. Copy `.env.example` to the ignored `.dev.vars` file and enter the project's publishable key. Supabase owns accounts; the scaffold's simulated ChatGPT identity does not authenticate county commands. See `supabase/SETUP.md` before activating the migration.
+Apply the initial local migration once to an empty database. Additional migrations must be applied in order. Copy `.env.example` to the ignored `.dev.vars` file and enter the project's publishable key. Supabase owns accounts; the scaffold's simulated ChatGPT identity does not authenticate county commands. Local county storage defaults to D1; setting `COUNTY_STORAGE=supabase` with a server secret connects it to the live county. See `supabase/SETUP.md` for current deployment status and `CLOUDFLARE.md` for deployment commands.
 
 ```sh
 npx tsc --noEmit
@@ -51,10 +53,10 @@ Static scenery and aircraft parts are combined by material to reduce draw calls.
 
 ## Architecture and limits
 
-The shared alpha stays on the existing Sites/Cloudflare host. Accounts use Supabase; gameplay storage defaults to the existing D1 database until export/import is checked and `COUNTY_STORAGE=supabase` is explicitly enabled with a server-only secret. It uses four flight updates per second and interpolation for other aircraft; county jobs and standings refresh separately every four seconds. A dedicated authoritative WebSocket service is the recommended next step before increasing population or demanding tighter flight synchronization. The Supabase transaction uses a short county-wide advisory lock for the 32-pilot alpha; this is not a load-tested capacity claim.
+The shared alpha runs in the owner's Cloudflare Workers account. Supabase stores accounts, pilot careers, contract claims, and payouts. Server-only credentials protect the gameplay API. It uses four flight updates per second and interpolation for other aircraft; county jobs and standings refresh separately every four seconds. A dedicated authoritative WebSocket service is the recommended next step before increasing population or demanding tighter flight synchronization. The Supabase transaction uses a short county-wide advisory lock for the 32-pilot alpha; this is not a load-tested capacity claim.
 
 Gameplay uses arcade flight dynamics, terrain impacts, instant free refills, and one pilot per contract. Plane-to-plane collisions, cooperative payouts, runway takeoff/landing, sophisticated anti-bot detection, and real agronomic application rates are outside this alpha. Active contract progress is lost if a claim expires, a field is released, or a contract is restarted.
 
-Data schema lives in `db/schema.ts`; Drizzle migrations live in `drizzle/`. Do not rewrite a migration after it is published. `lib/server/county-service.ts` owns the public economy and conditional database transactions. `lib/county-client.ts` sends input samples and reconciles local flight against server state.
+The Supabase schema and transactional functions live in `supabase/migrations/`. Local/legacy D1 schema lives in `db/schema.ts`, with Drizzle migrations in `drizzle/`. Do not rewrite a migration after it is published. `lib/server/county-service.ts` owns the public economy and conditional database transactions. `lib/county-client.ts` sends input samples and reconciles local flight against server state.
 
 WebMCP is feature-detected: public mode exposes `get_public_county` and `claim_county_contract`; solo practice exposes its own flight tools. No supported live WebMCP validation context was available, so these registrations remain unverified in a WebMCP-enabled browser. Browser visual/interaction testing and multiplayer load testing have not been performed. Core rules, SQLite transactions, types, application-source lint, and native HTTP API flows have been checked.

@@ -1,0 +1,15 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "prairie-air",
+  "account_id": "767e8584caf84d5ed5e88572fb200e35",
+  "main": "vinext/server/fetch-handler",
+  "compatibility_date": "2026-09-05",
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": true,
+  "preview_urls": false,
+  "observability": { "enabled": true },
+  "vars": {
+    "SUPABASE_URL": "https://jyclvsljxzszxjhpmsab.supabase.co",
+    "COUNTY_STORAGE": "supabase"
+  }
+}

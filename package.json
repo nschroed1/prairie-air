@@ -8,6 +8,8 @@
   "scripts": {
     "dev": "vinext dev",
     "build": "vinext build",
+    "build:cloudflare": "vinext build --mode cloudflare",
+    "check:cloudflare": "npm run build:cloudflare && wrangler deploy --config dist/server/wrangler.json --dry-run",
     "start": "wrangler dev --config dist/server/wrangler.json",
     "lint": "oxlint",
     "format": "oxfmt"
