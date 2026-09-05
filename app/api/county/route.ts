@@ -1,24 +1,15 @@
-import { database } from '@/lib/server/database';
+import { countyBackend } from '@/lib/server/county-backend';
 import { CountyService, CountyError } from '@/lib/server/county-service';
 import { validateCommand } from '@/lib/county';
+import { verifiedPlayer } from '@/lib/server/auth';
 export const dynamic = 'force-dynamic';
 const headers = { 'Cache-Control': 'no-store' };
-async function viewer(request: Request) {
-  // Sites dispatch supplies this identity and strips visitor-supplied values.
-  const identity = request.headers.get('oai-authenticated-user-id');
-  if (!identity) return null;
-  const digest = await crypto.subtle.digest(
-    'SHA-256',
-    new TextEncoder().encode(`prairie-air:${identity}`),
-  );
-  return Array.from(new Uint8Array(digest), (b) =>
-    b.toString(16).padStart(2, '0'),
-  ).join('');
-}
 export async function GET(request: Request) {
   try {
     return Response.json(
-      await new CountyService(database()).snapshot(await viewer(request)),
+      await new CountyService(countyBackend()).snapshot(
+        await verifiedPlayer(request),
+      ),
       { headers },
     );
   } catch {
@@ -38,10 +29,10 @@ export async function POST(request: Request) {
       { error: 'Use the game page to send flight commands.' },
       { status: 403, headers },
     );
-  const id = await viewer(request);
+  const id = await verifiedPlayer(request);
   if (!id)
     return Response.json(
-      { error: 'Sign in with ChatGPT to join this county.' },
+      { error: 'Sign in to your pilot account to join this county.' },
       { status: 401, headers },
     );
   if (!request.headers.get('content-type')?.includes('application/json'))
@@ -75,7 +66,7 @@ export async function POST(request: Request) {
       );
     }
     return Response.json(
-      await new CountyService(database()).command(id, command),
+      await new CountyService(countyBackend()).command(id, command),
       { headers },
     );
   } catch (e) {

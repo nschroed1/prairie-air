@@ -6,6 +6,7 @@ import {
   hydrate,
 } from './county';
 import { Simulation, type Controls } from './simulation';
+import { browserAuth, playerHeaders } from './supabase/client';
 
 export class CountyClient {
   snapshot: CountySnapshot | null = null;
@@ -24,9 +25,29 @@ export class CountyClient {
   ) {}
   generation = 0;
   flightGeneration = 0;
+  unsubscribeAuth: (() => void) | null = null;
+  authUser: string | null = null;
   async start() {
     this.disposed = false;
     const generation = ++this.generation;
+    try {
+      const auth = await browserAuth();
+      if (this.disposed || generation !== this.generation) return;
+      const { data } = auth.auth.onAuthStateChange((_event, session) => {
+        const id = session?.user.id ?? null;
+        if (id === this.authUser) return;
+        this.authUser = id;
+        this.disconnect();
+        this.snapshot = null;
+        // Do not re-enter the Auth client while its change callback holds a lock.
+        setTimeout(() => {
+          if (!this.disposed) void this.poll();
+        }, 0);
+      });
+      this.unsubscribeAuth = () => data.subscription.unsubscribe();
+    } catch {
+      /* Public spectating can still load while account setup is unavailable. */
+    }
     await this.poll();
     if (!this.disposed && generation === this.generation)
       this.timer = setInterval(() => {
@@ -37,10 +58,27 @@ export class CountyClient {
   async poll() {
     if (this.pending || this.disposed) return;
     this.lastPoll = Date.now();
+    const generation = this.flightGeneration;
     try {
-      const r = await fetch('/api/county', { cache: 'no-store' });
+      let headers = {};
+      try {
+        headers = await playerHeaders();
+      } catch {
+        /* Remain a spectator. */
+      }
+      if (this.disposed || generation !== this.flightGeneration) return;
+      const r = await fetch('/api/county', { cache: 'no-store', headers });
       if (!r.ok) throw new Error();
-      this.snapshot = await r.json();
+      const snapshot = (await r.json()) as CountySnapshot;
+      if (this.disposed || generation !== this.flightGeneration || this.pending)
+        return;
+      if (
+        snapshot.viewerId === this.snapshot?.viewerId &&
+        (snapshot.player?.revision ?? -1) <
+          (this.snapshot?.player?.revision ?? -1)
+      )
+        return;
+      this.snapshot = snapshot;
       this.status = 'County connected';
       this.changed();
     } catch {
@@ -65,7 +103,7 @@ export class CountyClient {
     if (this.pending || this.disposed) return false;
     if (!this.online) await this.poll();
     if (!this.snapshot?.viewerId) {
-      this.notify('Sign in with ChatGPT to fly in the public county.');
+      this.notify('Sign in to your pilot account to fly in the public county.');
       return false;
     }
     return this.send(action, extra);
@@ -89,9 +127,11 @@ export class CountyClient {
       refreshCounty: Date.now() - this.lastFull > 4000,
     };
     try {
+      const headers = await playerHeaders();
+      if (this.disposed || generation !== this.flightGeneration) return false;
       const response = await fetch('/api/county', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...headers },
         body: JSON.stringify(body),
         signal: AbortSignal.timeout(10000),
       });
@@ -153,6 +193,8 @@ export class CountyClient {
   dispose() {
     this.disposed = true;
     this.generation++;
+    this.unsubscribeAuth?.();
+    this.unsubscribeAuth = null;
     if (this.timer) clearInterval(this.timer);
   }
 }

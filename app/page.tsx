@@ -346,7 +346,13 @@ export default function Home() {
             <small>YOUR EARNINGS</small>
             <strong>{money(sim.career.cash)}</strong>
           </div>
-          <span className="avatar">{mode === 'public' ? 'PA' : 'SOLO'}</span>
+          <Link
+            className="avatar"
+            href="/auth"
+            aria-label="Manage pilot account"
+          >
+            {mode === 'public' ? 'PA' : 'SOLO'}
+          </Link>
         </div>
       </header>
       <div className="location">
@@ -440,17 +446,18 @@ export default function Home() {
             <ArrowUpRight size={21} />
           </button>
           {mode === 'public' && county && !county.viewerId && (
-            <a
-              className="signin-link"
-              href="/signin-with-chatgpt?return_to=/"
-              target="_top"
-            >
-              Sign in with ChatGPT to join
-            </a>
+            <Link className="signin-link" href="/auth">
+              Sign in or create your pilot account
+            </Link>
           )}
           <button className="practice-link" onClick={practice}>
             Solo practice
           </button>
+          {county?.viewerId && (
+            <Link href="/auth" className="signin-link">
+              Manage pilot account
+            </Link>
+          )}
           <span className="launch-note">
             {mode === 'public'
               ? 'ONE PUBLIC COUNTY. 60 CONTRACTS. EVERY ACRE COUNTS.'

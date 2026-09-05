@@ -1,6 +1,7 @@
 'use client';
 /* oxlint-disable next/no-html-link-for-pages -- Sites sign-in requires top-level native navigation. */
 import { useState } from 'react';
+import Link from 'next/link';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Input } from '@/components/ui/input';
 import { Progress } from '@/components/ui/progress';
@@ -116,13 +117,9 @@ export function CountyPanel({
           </button>
         )}
         {!county.viewerId && (
-          <a
-            href="/signin-with-chatgpt?return_to=/"
-            target="_top"
-            className="signin-link"
-          >
+          <Link href="/auth" className="signin-link">
             Sign in to fly
-          </a>
+          </Link>
         )}
       </div>
       <Tabs defaultValue={initialTab}>
