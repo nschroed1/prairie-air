@@ -1,5 +1,6 @@
 import * as T from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+import type { CountySnapshot, PublicPilot } from './county';
 import {
   ground,
   riverX,
@@ -44,6 +45,10 @@ export class World {
   cameraMode = 0;
   resizeObserver: ResizeObserver;
   onFrame: (() => void) | null = null;
+  beforeStep: ((dt: number) => void) | null = null;
+  otherPilots = new Map<string, { mesh: T.Group; target: PublicPilot }>();
+  cropMaterials: { material: T.MeshStandardMaterial; color: T.Color }[] = [];
+  seasonalPhase = -1;
   disposed = false;
   constructor(
     public host: HTMLElement,
@@ -59,7 +64,7 @@ export class World {
     this.renderer.toneMapping = T.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 1.22;
     this.renderer.shadowMap.enabled = true;
-    this.renderer.shadowMap.type = T.PCFSoftShadowMap;
+    this.renderer.shadowMap.type = T.PCFShadowMap;
     this.host.appendChild(this.renderer.domElement);
     this.renderer.domElement.setAttribute(
       'aria-label',
@@ -237,6 +242,7 @@ export class World {
     fields.forEach((f) => {
       const base = palettes[f.crop][Math.floor(rng() * 3)];
       const material = mat(base);
+      this.cropMaterials.push({ material, color: material.color.clone() });
       material.onBeforeCompile = (shader) => {
         shader.vertexShader = 'varying vec3 vLocal;\n' + shader.vertexShader;
         shader.vertexShader = shader.vertexShader.replace(
@@ -683,6 +689,7 @@ export class World {
     const dt = this.last ? Math.min((ms - this.last) / 1000, 0.05) : 0.016;
     this.last = ms;
     this.time += dt;
+    this.beforeStep?.(dt);
     this.sim.step(dt, this.input);
     this.updatePlane();
     this.updateMarker();
@@ -715,10 +722,76 @@ export class World {
     this.cloudGroup.position.x = Math.sin(this.time * 0.003) * 140;
     this.plane.updateMatrixWorld();
     this.updateParticles(dt);
+    for (const { mesh, target } of this.otherPilots.values()) {
+      mesh.position.lerp(
+        new T.Vector3(target.x, target.y, target.z),
+        1 - Math.exp(-dt * 8),
+      );
+      mesh.rotation.order = 'YXZ';
+      mesh.rotation.set(target.pitch, -target.heading, target.roll);
+    }
     this.renderer.render(this.scene, this.camera);
     this.onFrame?.();
     this.frame = requestAnimationFrame(this.animate);
   };
+  setCounty(county: CountySnapshot | null) {
+    const live =
+      county?.pilots.filter(
+        (p) => p.id !== county.viewerId && p.phase === 'flying',
+      ) ?? [];
+    for (const [id, other] of this.otherPilots) {
+      if (!live.some((p) => p.id === id)) {
+        this.scene.remove(other.mesh);
+        other.mesh.traverse((o) => {
+          if (o instanceof T.Sprite) {
+            o.material.map?.dispose();
+            o.material.dispose();
+          }
+        });
+        this.otherPilots.delete(id);
+      }
+    }
+    for (const pilot of live) {
+      let other = this.otherPilots.get(pilot.id);
+      if (!other) {
+        const mesh = this.plane.clone(true);
+        mesh.visible = true;
+        mesh.position.set(pilot.x, pilot.y, pilot.z);
+        const canvas = document.createElement('canvas');
+        canvas.width = 256;
+        canvas.height = 48;
+        const ctx = canvas.getContext('2d')!;
+        ctx.fillStyle = '#153d31cc';
+        ctx.fillRect(0, 0, 256, 48);
+        ctx.font = '20px Arial';
+        ctx.textAlign = 'center';
+        ctx.fillStyle = '#edf5c8';
+        ctx.fillText(pilot.callsign, 128, 31);
+        const label = new T.Sprite(
+          new T.SpriteMaterial({
+            map: new T.CanvasTexture(canvas),
+            transparent: true,
+            depthTest: false,
+          }),
+        );
+        label.position.set(0, 6, 0);
+        label.scale.set(20, 3.75, 1);
+        mesh.add(label);
+        other = { mesh, target: pilot };
+        this.otherPilots.set(pilot.id, other);
+        this.scene.add(mesh);
+      } else other.target = pilot;
+    }
+    const phase = county?.season.phaseIndex ?? -1;
+    if (phase !== this.seasonalPhase) {
+      this.seasonalPhase = phase;
+      for (const { material, color } of this.cropMaterials) {
+        material.color.copy(color);
+        if (phase === 0) material.color.lerp(new T.Color('#76a660'), 0.22);
+        if (phase === 2) material.color.lerp(new T.Color('#bd8d38'), 0.5);
+      }
+    }
+  }
   dispose() {
     this.disposed = true;
     cancelAnimationFrame(this.frame);

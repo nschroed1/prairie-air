@@ -37,7 +37,8 @@ for (let z = -6; z <= 6; z++)
               : 'soybeans',
     });
   }
-export const contracts = [
+export type Contract = { id: number; name: string; farmer: string; crop: Field['crop']; treatment: string; x: number; z: number; acres: number; pay: number; bonus: number; target: number; bonusTarget: number; note: string; difficulty: string };
+export const contracts: readonly Contract[] = [
   {
     id: 0,
     name: 'The first pass',
@@ -87,7 +88,6 @@ export const contracts = [
     difficulty: 'Precision work',
   },
 ] as const;
-export type Contract = (typeof contracts)[number];
 export type Upgrades = { tank: number; boom: number; stability: number };
 export type Career = {
   cash: number;

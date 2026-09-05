@@ -2,6 +2,7 @@ import type { Metadata } from 'next';
 import { Geist, Geist_Mono } from 'next/font/google';
 import './globals.css';
 import './game.css';
+import './county.css';
 
 const geistSans = Geist({
   variable: '--font-geist-sans',
@@ -15,7 +16,8 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: 'Prairie Air — A little closer to the land',
-  description: 'Fly a crop duster over the Iowa heartland. Take contracts, perfect your passes, and build your aviation career.',
+  description:
+    'Fly together over Iowa. Claim finite seasonal contracts, compete on county leaderboards, and build your aviation career.',
 };
 
 export default function RootLayout({

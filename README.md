@@ -1,34 +1,54 @@
 # Prairie Air
 
-A playable Three.js crop-dusting MVP set in the Iowa heartland. The scene is built from procedural meshes and shaders, without external game assets.
+A Three.js crop-dusting game set in a shared Iowa county. Public pilots compete for a finite seasonal pool of farm contracts and appear in each other's skies and field maps.
 
-## Run
+## Public county
 
-Requires Node 22.13+.
+- One shared county, capped at 32 connected pilots in this alpha; this is an admission limit, not a load-tested capacity claim.
+- Seven-day seasons, starting September 5, 2026 at 00:00 UTC. Each season has 60 jobs on distinct physical fields. Spring fertilizer, summer crop protection, and fall cover-crop seeding open in three scheduled waves of 20. No random or unlimited contract generation.
+- One active field per pilot. Claims are atomic across players. Two minutes without new coverage releases a claim; completed jobs never reopen within their season.
+- Server-simulated flight, coverage, upgrades, and payments. Input packets are constrained by server time. The client does not submit a trusted position, cash balance, payout, or coverage score.
+- Seasonal standings rank earnings, then precision. Previous-season standings remain visible. Careers, aircraft upgrades, and cash carry over; seasonal scores reset. All upgrade levels compete together in this alpha.
+- Free flight remains available when contracts are finished or awaiting their next scheduled wave.
+- Sites dispatch handles ChatGPT sign-in. Anonymous visitors can spectate and read the county; write actions require verified dispatch identity. Only a pseudonymous, editable callsign appears publicly. Email and account identity are not exposed.
+- Solo practice retains the original three repeatable contracts and device-local career. Practice progress never enters the public economy or rankings.
+
+## Run locally
+
+Requires Node 22.13+ (Node 24 was used for validation).
 
 ```sh
 npm install
+npx wrangler d1 execute DB --local --config wrangler.local.json --file drizzle/0000_nasty_darkhawk.sql
 npm run dev
 ```
 
-Open the local URL printed by the server. `npm run build` creates a Cloudflare-compatible production build. `npx tsc --noEmit` checks types. `npx tsx --test tests/simulation.test.ts` exercises the game rules.
+Apply the initial local migration once to an empty database. Additional migrations must be applied in order. Use the sign-in link in the game for the scaffold's local development identity. Production builds exclude the local identity simulator.
 
-## Fly
+```sh
+npx tsc --noEmit
+npx oxlint app lib db components/county-panel.tsx tests/county.test.ts
+npx tsx --test tests/county.test.ts tests/simulation.test.ts
+npm run build
+```
 
-- W/S or up/down: climb/descend; A/D or left/right: bank and turn.
+The unmodified generated component catalog has existing lint errors under the scaffold configuration. Application-source lint is checked separately.
+
+## Controls
+
+- W/S or up/down: climb/descend. A/D or left/right: bank and turn.
 - Hold Space: spray. Shift/Ctrl: increase/decrease throttle.
-- Keep 20–98 ft above the ground, under 136 mph, and your wings level.
-- C: chase/forward camera. P or Escape: pause.
-- R: return to the field and refill, retaining current coverage.
-- Enter: complete an eligible contract and claim the payout.
-- Touch devices have steering and spray controls.
+- Keep 20–98 ft above terrain, under 136 mph, and wings level to apply treatment.
+- C: camera. P/Escape: pause your aircraft; the public county keeps running.
+- R: refill and return to your claimed field. Enter: complete an eligible contract.
+- Touch controls support steering and spraying.
 
-Three contracts require 80%, 85%, or 90% coverage, with separate precision bonuses at 95%, 96%, and 98%. Covered cells count once. Spray outside the target field, at excessive altitude/speed, or while banking uses fluid without gaining coverage. Crashing loses that contract's progress. Spend earnings on tank capacity, boom width, and wind stability. Career data is local to the browser and saved after payouts and purchases.
+## Architecture and limits
 
-## MVP scope
+The initial shared alpha stays on the existing Sites/Cloudflare host with a D1 database. It uses four flight updates per second and interpolation for other aircraft; county jobs and standings refresh separately every four seconds. It does not yet use WebSockets, Durable Objects, or Supabase. A dedicated authoritative WebSocket service is the recommended next step before increasing population or demanding tighter flight synchronization. The current durable state and protocol can be migrated without importing client-trusted scores.
 
-Arcade flight dynamics, terrain impact, a finite county, free return/refill, repeatable contracts, and procedural engine audio. Building/tree collisions, runway takeoff/landing, realistic pesticide simulation, multiplayer, and server career sync are outside this MVP. Graphics require WebGL 2 with hardware acceleration. Engine sound is opt-in.
+Gameplay uses arcade flight dynamics, terrain impacts, instant free refills, and one pilot per contract. Plane-to-plane collisions, cooperative payouts, runway takeoff/landing, sophisticated anti-bot detection, and real agronomic application rates are outside this alpha. Active contract progress is lost if a claim expires, a field is released, or a contract is restarted.
 
-The page feature-detects WebMCP and registers `get_flight_status` and `start_flight_contract`. No supported live WebMCP validation context was available during implementation; registration and interaction remain unverified in a WebMCP-enabled browser. Browser visual and interaction QA was not performed.
+Data schema lives in `db/schema.ts`; Drizzle migrations live in `drizzle/`. Do not rewrite a migration after it is published. `lib/server/county-service.ts` owns the public economy and conditional database transactions. `lib/county-client.ts` sends input samples and reconciles local flight against server state.
 
-Validation: seven simulation tests, TypeScript, and production build pass. Application-source lint passes; the unmodified generated component catalog has existing lint errors under the scaffold configuration.
+WebMCP is feature-detected: public mode exposes `get_public_county` and `claim_county_contract`; solo practice exposes its own flight tools. No supported live WebMCP validation context was available, so these registrations remain unverified in a WebMCP-enabled browser. Browser visual/interaction testing and multiplayer load testing have not been performed. Core rules, SQLite transactions, types, application-source lint, and native HTTP API flows have been checked.

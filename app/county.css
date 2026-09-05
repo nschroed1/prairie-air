@@ -1,0 +1,508 @@
+.county-status {
+  position: absolute;
+  left: 40px;
+  top: 145px;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  border: 1px solid #ddebaf33;
+  border-radius: 4px;
+  background: #183c329e;
+  color: #e3edc5;
+  backdrop-filter: blur(10px);
+  padding: 8px 10px;
+  font-size: 9px;
+  letter-spacing: 1px;
+}
+.county-status:hover {
+  background: #234d3de0;
+}
+.practice-link,
+.signin-link {
+  display: block;
+  border: 0;
+  background: transparent;
+  color: #eef5d7;
+  font-size: 12px;
+  text-decoration: underline;
+  text-underline-offset: 4px;
+  margin-top: 13px;
+  padding: 0;
+}
+.signin-link {
+  color: #e4f3b4;
+}
+.county-panel {
+  margin-top: 4px;
+}
+.county-season {
+  display: flex;
+  justify-content: space-between;
+  gap: 20px;
+  align-items: center;
+  margin-bottom: 16px;
+}
+.county-season h3 {
+  font-family: Georgia, serif;
+  font-size: 25px;
+  font-weight: 400;
+  margin: 12px 0 6px;
+  line-height: 1.2;
+}
+.county-season p {
+  font-size: 12px;
+  color: #b7cda9;
+  margin: 0;
+}
+.season-clock {
+  display: flex;
+  gap: 7px;
+  align-items: center;
+  font-size: 12px;
+  color: #dae9ba;
+  white-space: nowrap;
+}
+.county-season .eyebrow {
+  font-size: 10px;
+  letter-spacing: 1.7px;
+  color: #d5e5ad;
+}
+.season-waves {
+  display: flex;
+  gap: 15px;
+  margin: 13px 0 21px;
+  justify-content: space-between;
+  color: #8fa98d;
+  font-size: 11px;
+}
+.season-waves span {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+.wave-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: #6b8e66;
+}
+.season-waves .current-wave {
+  color: #deedac;
+}
+.current-wave .wave-dot {
+  background: #deedac;
+}
+.county-totals {
+  display: flex;
+  justify-content: space-between;
+  background: #ffffff05;
+  border: 1px solid #dcecaa21;
+  border-radius: 7px;
+  padding: 17px 23px;
+  margin-bottom: 23px;
+}
+.county-totals > div {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+.county-totals strong {
+  font-size: 27px;
+  line-height: 1;
+  font-weight: 450;
+  font-variant-numeric: tabular-nums;
+}
+.county-totals small {
+  font-size: 12px;
+  color: #a3b99d;
+}
+.county-totals span {
+  font-size: 9px;
+  letter-spacing: 1px;
+  color: #b3c9a5;
+}
+.county-tabs {
+  width: 100% !important;
+  background: #102d2599 !important;
+  padding: 4px !important;
+  height: 42px !important;
+  border: 1px solid #e1edb821;
+}
+.county-tabs button {
+  padding: 8px 12px !important;
+  gap: 8px !important;
+  font-size: 13px !important;
+  color: #afc7a3 !important;
+}
+.county-tabs [data-active] {
+  background: #deedab !important;
+  color: #24412b !important;
+}
+.field-filters {
+  display: flex;
+  gap: 8px;
+  margin: 18px 0 12px;
+  flex-wrap: wrap;
+}
+.field-filters button {
+  padding: 7px 11px;
+  border: 1px solid #dce8b826;
+  border-radius: 4px;
+  color: #bcd0b0;
+  background: transparent;
+  font-size: 11px;
+}
+.field-filters button.selected {
+  background: #ddecac15;
+  border-color: #dce8b85c;
+  color: #e4efc8;
+}
+.county-jobs {
+  max-height: 330px;
+  overflow: auto;
+  padding-right: 5px;
+  scrollbar-color: #78965b #16362c;
+  scrollbar-width: thin;
+}
+.county-job {
+  display: flex;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 17px 15px;
+  margin-bottom: 8px;
+  border: 1px solid #cdddaf21;
+  border-radius: 6px;
+  background: #ffffff03;
+}
+.county-job small {
+  font-size: 9px;
+  letter-spacing: 1px;
+  color: #a5bc99;
+}
+.county-job h4 {
+  font-family: Georgia, serif;
+  font-size: 23px;
+  line-height: 1.2;
+  font-weight: 400;
+  margin: 7px 0;
+}
+.county-job p {
+  font-size: 12px;
+  color: #c4d4b6;
+  margin: 7px 0;
+}
+.field-owner {
+  font-size: 11px;
+  color: #a9c1a1;
+}
+.field-payment {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  flex: none;
+  gap: 6px;
+}
+.field-payment strong {
+  font-size: 22px;
+  font-weight: 400;
+}
+.field-payment small {
+  font-size: 10px;
+  letter-spacing: 0;
+  color: #d7e7a3;
+}
+.field-payment .primary {
+  padding: 9px 12px;
+  font-size: 11px;
+  gap: 10px;
+  margin-top: 5px;
+}
+.county-empty {
+  text-align: center;
+  padding: 35px 25px;
+  border: 1px dashed #c6df9c29;
+  border-radius: 7px;
+  margin-top: 15px;
+}
+.county-empty svg {
+  display: block;
+  margin: 0 auto 15px;
+  color: #d1e79d;
+}
+.county-empty h3 {
+  font-family: Georgia, serif;
+  font-size: 24px;
+  font-weight: 400;
+  margin: 8px 0;
+}
+.county-empty p {
+  font-size: 12px;
+  line-height: 1.8;
+  color: #adc4a3;
+  margin: 0 auto;
+  max-width: 370px;
+}
+.county-empty button {
+  margin: 16px auto 0;
+}
+.standings {
+  overflow-x: auto;
+}
+.standings h3 {
+  font-size: 15px;
+  font-weight: 500;
+  margin: 24px 0 16px;
+}
+.standings table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+  white-space: nowrap;
+}
+.standings th {
+  text-align: left;
+  font-size: 10px;
+  color: #a8c09c;
+  font-weight: 400;
+  padding: 10px 8px;
+  border-bottom: 1px solid #d7e4b626;
+}
+.standings td {
+  padding: 14px 8px;
+  border-bottom: 1px solid #d7e4b613;
+  color: #dce7c8;
+}
+.standings th:last-child,
+.standings td:last-child {
+  text-align: right;
+}
+.standings td:first-child {
+  color: #b7cc99;
+}
+.standings .your-rank {
+  background: #ddecaa0b;
+}
+.standings .your-rank td {
+  color: #e7f5b5;
+}
+.pilot-roster {
+  margin-top: 16px;
+}
+.pilot-roster > div {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  border-bottom: 1px solid #daedb521;
+  padding: 14px 5px;
+  color: #d7e7bf;
+}
+.pilot-roster strong {
+  font-size: 13px;
+  font-weight: 500;
+}
+.pilot-roster span {
+  margin-left: auto;
+  font-size: 11px;
+  color: #b5cca7;
+}
+.callsign-form {
+  margin-top: 25px;
+}
+.callsign-form label {
+  font-size: 12px;
+  color: #c3d7af;
+  display: block;
+  margin-bottom: 10px;
+}
+.callsign-form > div {
+  display: flex;
+  gap: 12px;
+}
+.callsign-form input {
+  background: #0b2b2399;
+  border-color: #c7e49b44;
+  color: #e3edce;
+}
+.callsign-form button {
+  padding: 8px 17px;
+}
+.county-panel .save-note {
+  font-size: 12px;
+  line-height: 1.7;
+}
+.topbar nav {
+  gap: 0;
+}
+.topbar nav button {
+  padding-left: 15px;
+  padding-right: 15px;
+}
+@media (max-width: 1100px) {
+  .county-status {
+    left: 25px;
+    font-size: 8px;
+  }
+  .topbar nav button {
+    padding-left: 10px;
+    padding-right: 10px;
+  }
+  .topbar nav button svg {
+    display: none;
+  }
+  .topbar .brand {
+    font-size: 19px;
+  }
+  .topbar .brand small {
+    font-size: 6px;
+  }
+}
+@media (max-width: 800px) {
+  .county-status {
+    top: 151px;
+    left: 22px;
+    font-size: 7px;
+    max-width: 85%;
+    padding: 6px 8px;
+  }
+  .mission-card.mission-active {
+    top: 187px;
+  }
+  .county-season h3 {
+    font-size: 22px;
+  }
+  .county-totals {
+    padding: 15px;
+  }
+  .season-waves {
+    font-size: 10px;
+    gap: 9px;
+  }
+  .county-panel .save-note {
+    font-size: 11px;
+  }
+}
+@media (max-width: 560px) {
+  .county-status {
+    top: 156px;
+    left: 20px;
+    font-size: 6px;
+    letter-spacing: 0.6px;
+  }
+  .welcome {
+    top: 28%;
+  }
+  .welcome h1 {
+    font-size: 48px;
+    margin-top: 14px;
+  }
+  .welcome p {
+    display: none;
+  }
+  .welcome .practice-link,
+  .welcome .signin-link {
+    font-size: 10px;
+    margin-top: 10px;
+  }
+  .mission-card.mission-active {
+    top: 194px;
+  }
+  .county-season {
+    align-items: flex-start;
+    gap: 12px;
+  }
+  .county-season .eyebrow {
+    font-size: 8px;
+  }
+  .county-season h3 {
+    font-size: 22px;
+  }
+  .county-season p {
+    font-size: 10px;
+  }
+  .season-clock {
+    font-size: 10px;
+    gap: 4px;
+  }
+  .county-totals span {
+    font-size: 7px;
+    letter-spacing: 0.5px;
+  }
+  .county-totals strong {
+    font-size: 24px;
+  }
+  .season-waves {
+    font-size: 8px;
+    gap: 6px;
+  }
+  .season-waves span {
+    gap: 3px;
+  }
+  .county-job {
+    padding: 13px 10px;
+    gap: 10px;
+  }
+  .county-job h4 {
+    font-size: 20px;
+  }
+  .county-job p {
+    font-size: 10px;
+  }
+  .county-job small {
+    font-size: 8px;
+  }
+  .field-payment strong {
+    font-size: 19px;
+  }
+  .field-payment .primary {
+    font-size: 10px;
+    gap: 6px;
+    padding: 8px;
+  }
+  .field-owner {
+    font-size: 9px;
+  }
+  .county-tabs button {
+    font-size: 12px !important;
+  }
+  .field-filters {
+    gap: 5px;
+  }
+  .field-filters button {
+    font-size: 10px;
+    padding: 6px 8px;
+  }
+  .standings table {
+    font-size: 10px;
+  }
+  .standings th {
+    font-size: 9px;
+  }
+  .standings td,
+  .standings th {
+    padding-left: 5px;
+    padding-right: 5px;
+  }
+  .topbar nav button {
+    padding-left: 10px;
+    padding-right: 10px;
+  }
+  .topbar nav {
+    max-width: calc(100% - 115px);
+    overflow-x: auto;
+  }
+  .topbar .brand small {
+    font-size: 5px;
+  }
+}
+
+.county-flight-actions {
+  display: flex;
+  gap: 10px;
+  margin: 0 0 17px;
+  flex-wrap: wrap;
+}
+.county-flight-actions .signin-link {
+  margin: 0 0 0 auto;
+  font-size: 12px;
+  align-self: center;
+}

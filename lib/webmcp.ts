@@ -19,6 +19,64 @@ import {
   freshControls,
   type Controls,
 } from './simulation';
+import type { CountyClient } from './county-client';
+
+export function registerCountyTools(client: CountyClient, onClaim: () => void) {
+  const context = (document as ModelDocument).modelContext;
+  if (!context?.registerTool) return () => {};
+  const lifecycle = new AbortController();
+  const tools: Tool[] = [
+    {
+      name: 'get_public_county',
+      description:
+        'Read the public season, finite county contracts, standings, and your signed-in pilot.',
+      inputSchema: {
+        type: 'object',
+        properties: {},
+        additionalProperties: false,
+      },
+      annotations: { readOnlyHint: true },
+      execute: () => client.snapshot,
+    },
+    {
+      name: 'claim_county_contract',
+      description:
+        'Reserve one available public county field and start its flight. Releases any previous claim. Payment and coverage are calculated by the server.',
+      inputSchema: {
+        type: 'object',
+        properties: { jobId: { type: 'integer' } },
+        required: ['jobId'],
+        additionalProperties: false,
+      },
+      annotations: { readOnlyHint: false },
+      execute: async (input) => {
+        const id = (input as { jobId?: unknown })?.jobId;
+        if (
+          typeof id !== 'number' ||
+          !Number.isSafeInteger(id) ||
+          !client.snapshot?.jobs.some((j) => j.id === id && j.status === 'open')
+        )
+          throw new Error('Choose an open job ID from get_public_county.');
+        if (!client.online && !(await client.action('join')))
+          throw new Error('Sign in and join the county first.');
+        if (!(await client.action('claim', { jobId: id })))
+          throw new Error(
+            'Field could not be claimed. Refresh the county board.',
+          );
+        onClaim();
+        return { jobId: id, phase: client.sim.phase };
+      },
+    },
+  ];
+  for (const tool of tools) {
+    try {
+      Promise.resolve(
+        context.registerTool(tool, { signal: lifecycle.signal }),
+      ).catch(() => {});
+    } catch {}
+  }
+  return () => lifecycle.abort();
+}
 
 export function registerFlightTools(
   sim: Simulation,

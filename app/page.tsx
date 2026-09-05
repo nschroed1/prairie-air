@@ -1,5 +1,6 @@
 'use client';
 
+/* oxlint-disable next/no-html-link-for-pages -- Sites sign-in must use a top-level native anchor, not the app router. */
 /* oxlint-disable react/react-compiler -- The Three.js engine is an intentionally mutable external system; HUD state is refreshed on an explicit timer, and this component opts out of compiler memoization. */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -25,6 +26,7 @@ import {
   Gauge,
   Wrench,
   BriefcaseBusiness,
+  Globe,
 } from 'lucide-react';
 import {
   Dialog,
@@ -41,11 +43,14 @@ import {
   upgradePrice,
   type Contract,
 } from '@/lib/simulation';
-import { registerFlightTools } from '@/lib/webmcp';
+import { registerFlightTools, registerCountyTools } from '@/lib/webmcp';
 import type { World } from '@/lib/world';
+import { CountyClient } from '@/lib/county-client';
+import { CountyPanel } from '@/components/county-panel';
+import type { CountyJob, PublicPilot, Action } from '@/lib/county';
 
 const money = (n: number) => '$' + Math.round(n).toLocaleString('en-US');
-type Panel = 'contracts' | 'hangar' | 'help' | null;
+type Panel = 'contracts' | 'hangar' | 'help' | 'county' | 'standings' | null;
 
 export default function Home() {
   'use no memo'; // The imperative flight engine supplies a fresh HUD tick at 10 Hz.
@@ -60,6 +65,31 @@ export default function Home() {
     [panel, setPanel] = useState<Panel>(null),
     [muted, setMuted] = useState(true);
   const [notice, setNotice] = useState('');
+  const [mode, setMode] = useState<'public' | 'practice'>('public');
+  const [client] = useState(
+    () =>
+      new CountyClient(
+        sim,
+        () => refresh((v) => v + 1),
+        (message) => setNotice(message),
+      ),
+  );
+  const county = client.snapshot;
+  useEffect(() => {
+    void client.start();
+    return () => client.dispose();
+  }, [client]);
+  useEffect(() => {
+    world.current?.setCounty(mode === 'public' ? county : null);
+  }, [county, mode, revision]);
+  const onlineAction = useCallback(
+    async (action: Action) => {
+      Object.assign(controls.current, freshControls());
+      await client.action(action);
+      refresh((v) => v + 1);
+    },
+    [client],
+  );
   const save = useCallback(() => {
     try {
       localStorage.setItem('prairie-air-career-v1', JSON.stringify(sim.career));
@@ -72,14 +102,13 @@ export default function Home() {
   }, [sim]);
   useEffect(() => {
     let disposed = false;
-    try {
-      sim.career = loadCareer(localStorage.getItem('prairie-air-career-v1'));
-    } catch {}
     import('@/lib/world')
       .then(({ World }) => {
         if (disposed || !mount.current) return;
         try {
           world.current = new World(mount.current, sim, controls.current);
+          world.current.beforeStep = (dt) =>
+            client.record(dt, controls.current);
           setReady(true);
         } catch (e) {
           setError(e instanceof Error ? e.message : 'WebGL could not start');
@@ -97,14 +126,19 @@ export default function Home() {
       clearInterval(timer);
       world.current?.dispose();
     };
-  }, [sim]);
+  }, [sim, client]);
   useEffect(() => {
     if (!ready) return;
+    if (mode === 'public')
+      return registerCountyTools(client, () => {
+        setPanel(null);
+        refresh((v) => v + 1);
+      });
     return registerFlightTools(sim, controls.current, () => {
       setPanel(null);
       refresh((v) => v + 1);
     });
-  }, [ready, sim]);
+  }, [ready, sim, mode, client]);
   useEffect(() => {
     const binding: Record<string, keyof ReturnType<typeof freshControls>> = {
       KeyA: 'left',
@@ -131,13 +165,21 @@ export default function Home() {
       }
       if (e.repeat) return;
       if (e.code === 'Escape' || e.code === 'KeyP') {
-        if (sim.phase === 'flying') sim.phase = 'paused';
+        if (mode === 'public') {
+          void onlineAction(sim.phase === 'flying' ? 'pause' : 'resume');
+        } else if (sim.phase === 'flying') sim.phase = 'paused';
         else if (sim.phase === 'paused') sim.phase = 'flying';
       }
       if (e.code === 'KeyC' && world.current)
         world.current.cameraMode = 1 - world.current.cameraMode;
-      if (e.code === 'KeyR' && sim.phase === 'flying') sim.refill();
-      if (e.code === 'Enter' && sim.phase === 'flying' && sim.finish()) save();
+      if (e.code === 'KeyR' && sim.phase === 'flying') {
+        if (mode === 'public') void onlineAction('refill');
+        else sim.refill();
+      }
+      if (e.code === 'Enter' && sim.phase === 'flying') {
+        if (mode === 'public') void onlineAction('finish');
+        else if (sim.finish()) save();
+      }
       refresh((v) => v + 1);
     };
     const up = (e: KeyboardEvent) => {
@@ -145,7 +187,10 @@ export default function Home() {
     };
     const blur = () => {
       Object.assign(controls.current, freshControls());
-      if (sim.phase === 'flying') sim.phase = 'paused';
+      if (sim.phase === 'flying') {
+        if (mode === 'public' && client.online) void onlineAction('pause');
+        sim.phase = 'paused';
+      }
     };
     const visibility = () => {
       if (document.hidden) blur();
@@ -160,28 +205,68 @@ export default function Home() {
       window.removeEventListener('blur', blur);
       document.removeEventListener('visibilitychange', visibility);
     };
-  }, [panel, sim, save]);
+  }, [panel, sim, save, mode, client, onlineAction]);
   useEffect(() => {
-    drawMap(map.current, sim);
-  }, [revision, sim]);
+    drawMap(
+      map.current,
+      sim,
+      mode === 'public' ? county?.pilots : undefined,
+      county?.viewerId,
+    );
+  }, [revision, sim, county, mode]);
   const start = (job: Contract = sim.job) => {
+    if (mode === 'public') {
+      void onlineAction('retry');
+      return;
+    }
     sim.reset(job);
     setPanel(null);
     Object.assign(controls.current, freshControls());
     refresh((v) => v + 1);
   };
   const open = (next: Panel) => {
-    if (sim.phase === 'flying') sim.phase = 'paused';
+    if (sim.phase === 'flying') {
+      if (mode === 'public') void onlineAction('pause');
+      else sim.phase = 'paused';
+    }
     Object.assign(controls.current, freshControls());
-    setPanel(next);
+    setPanel(mode === 'public' && next === 'contracts' ? 'county' : next);
   };
   const pause = () => {
+    if (mode === 'public') {
+      void onlineAction(sim.phase === 'flying' ? 'pause' : 'resume');
+      return;
+    }
     sim.phase = sim.phase === 'flying' ? 'paused' : 'flying';
     Object.assign(controls.current, freshControls());
     refresh((v) => v + 1);
   };
   const finish = () => {
+    if (mode === 'public') {
+      void onlineAction('finish');
+      return;
+    }
     if (sim.finish()) save();
+  };
+  const joinCounty = async () => {
+    setMode('public');
+    if (await client.action('join')) setPanel('county');
+  };
+  const claim = async (job: CountyJob) => {
+    if (!client.online && !(await client.action('join'))) return;
+    if (await client.action('claim', { jobId: job.id })) {
+      setPanel(null);
+      setMode('public');
+    }
+  };
+  const practice = () => {
+    client.disconnect();
+    setMode('practice');
+    try {
+      sim.career = loadCareer(localStorage.getItem('prairie-air-career-v1'));
+    } catch {}
+    sim.reset(contracts[0]);
+    refresh((v) => v + 1);
   };
   const active = sim.phase !== 'ready',
     fly = sim.phase === 'flying';
@@ -226,11 +311,19 @@ export default function Home() {
             Fly
           </button>
           <button
-            className={panel === 'contracts' ? 'nav-active' : ''}
+            className={
+              panel === 'contracts' || panel === 'county' ? 'nav-active' : ''
+            }
             onClick={() => open('contracts')}
           >
             <BriefcaseBusiness size={16} />
-            Contracts <span className="nav-count">3</span>
+            {mode === 'public' ? 'County' : 'Contracts'}{' '}
+            <span className="nav-count">
+              {mode === 'public'
+                ? (county?.jobs.filter((j) => j.status === 'open').length ??
+                  '—')
+                : 3}
+            </span>
           </button>
           <button
             className={panel === 'hangar' ? 'nav-active' : ''}
@@ -239,6 +332,13 @@ export default function Home() {
             <Wrench size={16} />
             Hangar
           </button>
+          <button
+            className={panel === 'standings' ? 'nav-active' : ''}
+            onClick={() => open('standings')}
+          >
+            <Trophy size={16} />
+            Standings
+          </button>
         </nav>
         <div className="wallet">
           <span className="wallet-dot" />
@@ -246,13 +346,22 @@ export default function Home() {
             <small>YOUR EARNINGS</small>
             <strong>{money(sim.career.cash)}</strong>
           </div>
-          <span className="avatar">NS</span>
+          <span className="avatar">{mode === 'public' ? 'PA' : 'SOLO'}</span>
         </div>
       </header>
       <div className="location">
         <span className="live-dot" /> BLACK HAWK COUNTY, IOWA{' '}
         <span className="location-line" /> <span>42.47° N &nbsp; 92.31° W</span>
       </div>
+      <button className="county-status" onClick={() => open('county')}>
+        <Globe size={13} />
+        {mode === 'practice'
+          ? 'SOLO PRACTICE'
+          : county
+            ? `SEASON ${county.season.number} · ${county.season.phase.toUpperCase()} · ${county.pilots.length} PILOTS`
+            : 'CONNECTING TO COUNTY'}
+        <span className="live-dot" />
+      </button>
       <div className="weather">
         <Sun size={23} />
         <div>
@@ -317,91 +426,163 @@ export default function Home() {
           </p>
           <button
             className="primary launch"
-            onClick={() => start()}
-            disabled={!ready}
+            onClick={() => {
+              if (mode === 'public') void joinCounty();
+              else start();
+            }}
+            disabled={!ready || (mode === 'public' && !county?.viewerId)}
           >
-            {ready ? 'Take flight' : 'Preparing your aircraft…'}
+            {ready
+              ? mode === 'public'
+                ? 'Join public county'
+                : 'Take flight'
+              : 'Preparing your aircraft…'}
             <ArrowUpRight size={21} />
           </button>
+          {mode === 'public' && county && !county.viewerId && (
+            <a
+              className="signin-link"
+              href="/signin-with-chatgpt?return_to=/"
+              target="_top"
+            >
+              Sign in with ChatGPT to join
+            </a>
+          )}
+          <button className="practice-link" onClick={practice}>
+            Solo practice
+          </button>
           <span className="launch-note">
-            YOUR AIRCRAFT IS READY. THE FIELDS ARE WAITING.
+            {mode === 'public'
+              ? 'ONE PUBLIC COUNTY. 60 CONTRACTS. EVERY ACRE COUNTS.'
+              : 'PRACTICE FLIGHTS DO NOT ENTER THE LEADERBOARDS.'}
           </span>
         </section>
       )}
       <aside className={`mission-card ${active ? 'mission-active' : ''}`}>
         <div className="card-eyebrow">
           <span className="live-dot" />
-          {active ? 'CURRENT CONTRACT' : 'YOUR FIRST CONTRACT'}
-          <span>0{sim.job.id + 1} / 03</span>
-        </div>
-        <div className="mission-title">
-          <div>
-            <h2>{sim.job.name}</h2>
-            <p>
-              <MapPin size={13} />
-              {sim.job.farmer}
-            </p>
-          </div>
-          <span className="crop-icon">
-            <Sprout size={24} />
-          </span>
-        </div>
-        <div className="mission-details">
+          {mode === 'public'
+            ? county?.player?.activeJob
+              ? 'COUNTY CONTRACT'
+              : 'PUBLIC COUNTY'
+            : active
+              ? 'CURRENT CONTRACT'
+              : 'YOUR FIRST CONTRACT'}
           <span>
-            {sim.job.acres} acres of {sim.job.crop}
+            {mode === 'public'
+              ? `SEASON ${county?.season.number ?? 1}`
+              : `0${sim.job.id + 1} / 03`}
           </span>
-          <span>·</span>
-          <span>{sim.job.treatment}</span>
         </div>
-        {active ? (
+        {mode === 'public' && sim.phase === 'ready' ? (
           <>
-            <div className="coverage-label">
-              <span>Field coverage</span>
-              <strong>
-                {sim.coverage.toFixed(1)}
-                <small>%</small>
-              </strong>
+            <div className="mission-title">
+              <h2>A season to remember.</h2>
+              <Sprout size={24} />
             </div>
-            <div className="coverage-track">
-              <Progress value={sim.coverage} aria-label="Field coverage" />
-              <span
-                className="target-mark"
-                style={{ left: `${sim.job.target}%` }}
-              />
+            <p className="mission-note">
+              {county?.jobs.filter((j) => j.status === 'open').length ?? '—'}{' '}
+              fields are ready for a pilot. The whole county shares 60 jobs this
+              season.
+            </p>
+            <div className="mission-reward">
+              <div>
+                <small>COMPLETED TOGETHER</small>
+                <strong>
+                  {county?.jobs.filter((j) => j.status === 'complete').length ??
+                    0}{' '}
+                  / 60
+                </strong>
+              </div>
+              <div>
+                <small>IN THE COUNTY</small>
+                <strong>{county?.pilots.length ?? 0} pilots</strong>
+              </div>
             </div>
-            <div className="targets">
-              <span>{sim.job.target}% to complete</span>
-              <span>{sim.job.bonusTarget}% for bonus</span>
-            </div>
+            <button className="text-button" onClick={() => open('county')}>
+              Explore county contracts
+              <ArrowUpRight size={15} />
+            </button>
           </>
         ) : (
-          <p className="mission-note">
-            A little care goes a long way.
-            <br />
-            Give the Millers’ corn a healthy start.
-          </p>
-        )}
-        <div className="mission-reward">
-          <div>
-            <small>CONTRACT PAY</small>
-            <strong>{money(sim.job.pay)}</strong>
-          </div>
-          <div>
-            <small>PRECISION BONUS</small>
-            <strong className="bonus">+{money(sim.job.bonus)}</strong>
-          </div>
-        </div>
-        {active && sim.coverage >= sim.job.target && fly && (
-          <button className="primary claim" onClick={finish}>
-            Complete contract
-            <Check size={17} />
-          </button>
-        )}
-        {!active && (
-          <button className="text-button" onClick={() => open('contracts')}>
-            View all contracts
-            <ArrowUpRight size={15} />
-          </button>
+          <>
+            {' '}
+            <div className="mission-title">
+              <div>
+                <h2>
+                  {mode === 'public' && !county?.player?.activeJob
+                    ? 'The county awaits.'
+                    : sim.job.name}
+                </h2>
+                <p>
+                  <MapPin size={13} />
+                  {mode === 'public' && !county?.player?.activeJob
+                    ? 'Black Hawk County'
+                    : sim.job.farmer}
+                </p>
+              </div>
+              <span className="crop-icon">
+                <Sprout size={24} />
+              </span>
+            </div>
+            <div className="mission-details">
+              <span>
+                {sim.job.acres} acres of {sim.job.crop}
+              </span>
+              <span>·</span>
+              <span>{sim.job.treatment}</span>
+            </div>
+            {active ? (
+              <>
+                <div className="coverage-label">
+                  <span>Field coverage</span>
+                  <strong>
+                    {sim.coverage.toFixed(1)}
+                    <small>%</small>
+                  </strong>
+                </div>
+                <div className="coverage-track">
+                  <Progress value={sim.coverage} aria-label="Field coverage" />
+                  <span
+                    className="target-mark"
+                    style={{ left: `${sim.job.target}%` }}
+                  />
+                </div>
+                <div className="targets">
+                  <span>{sim.job.target}% to complete</span>
+                  <span>{sim.job.bonusTarget}% for bonus</span>
+                </div>
+              </>
+            ) : (
+              <p className="mission-note">
+                A little care goes a long way.
+                <br />
+                Give the Millers’ corn a healthy start.
+              </p>
+            )}
+            <div className="mission-reward">
+              <div>
+                <small>CONTRACT PAY</small>
+                <strong>{money(sim.job.pay)}</strong>
+              </div>
+              <div>
+                <small>PRECISION BONUS</small>
+                <strong className="bonus">+{money(sim.job.bonus)}</strong>
+              </div>
+            </div>
+            {active && sim.coverage >= sim.job.target && fly && (
+              <button className="primary claim" onClick={finish}>
+                Complete contract
+                <Check size={17} />
+              </button>
+            )}
+            {!active && (
+              <button className="text-button" onClick={() => open('contracts')}>
+                View all contracts
+                <ArrowUpRight size={15} />
+              </button>
+            )}
+          </>
         )}
       </aside>
       {!active && (
@@ -419,7 +600,9 @@ export default function Home() {
             className={`flight-message ${sim.spraying && sim.validSpray && sim.inField ? 'spray-good' : ''}`}
           >
             <span className="live-dot" />
-            {sim.message || sprayMessage}
+            {mode === 'public' && !county?.player?.activeJob
+              ? 'Free flight · choose a county contract to earn'
+              : sim.message || sprayMessage}
           </div>
           <div className="reticle">
             <span />
@@ -574,7 +757,16 @@ export default function Home() {
             <Pause size={28} />
             <span className="eyebrow">TAKE A BREATHER</span>
             <h2>Holding your place.</h2>
-            <p>The fields will be right here.</p>
+            <p>
+              {mode === 'public'
+                ? 'The county keeps flying. Your claim expires after two minutes without new coverage.'
+                : 'The fields will be right here.'}
+            </p>
+            {mode === 'public' && !client.online && (
+              <button className="primary" onClick={() => void joinCounty()}>
+                Reconnect to county
+              </button>
+            )}
             <button className="primary" onClick={pause}>
               Resume flight
               <Play size={17} />
@@ -582,7 +774,8 @@ export default function Home() {
             <button
               className="secondary"
               onClick={() => {
-                sim.refill();
+                if (mode === 'public') void onlineAction('refill');
+                else sim.refill();
                 refresh((v) => v + 1);
               }}
             >
@@ -658,19 +851,57 @@ export default function Home() {
       >
         <DialogContent className="game-dialog">
           <DialogTitle>
-            {panel === 'contracts'
-              ? 'Good work, waiting for you.'
-              : panel === 'hangar'
-                ? 'Make this bird your own.'
-                : 'A feel for the flying.'}
+            {panel === 'county' || panel === 'standings'
+              ? 'The heartland, together.'
+              : panel === 'contracts'
+                ? 'Good work, waiting for you.'
+                : panel === 'hangar'
+                  ? 'Make this bird your own.'
+                  : 'A feel for the flying.'}
           </DialogTitle>
           <DialogDescription>
-            {panel === 'contracts'
-              ? 'Three local farms. A whole lot of possibility.'
-              : panel === 'hangar'
-                ? `Your crop duster · ${money(sim.career.cash)} available`
-                : 'A few simple controls. Plenty of room to get better.'}
+            {panel === 'county' || panel === 'standings'
+              ? 'A shared sky. A finite season. Your name on the board.'
+              : panel === 'contracts'
+                ? 'Three local farms. A whole lot of possibility.'
+                : panel === 'hangar'
+                  ? `Your crop duster · ${money(sim.career.cash)} available`
+                  : 'A few simple controls. Plenty of room to get better.'}
           </DialogDescription>
+          {(panel === 'county' || panel === 'standings') &&
+            (county ? (
+              <CountyPanel
+                key={panel}
+                county={county}
+                initialTab={panel === 'standings' ? 'standings' : 'fields'}
+                claim={(job) => void claim(job)}
+                rename={(name) => {
+                  void client.action('rename', { callsign: name });
+                }}
+                freeFlight={() => {
+                  void (async () => {
+                    setMode('public');
+                    if (!client.online && !(await client.action('join')))
+                      return;
+                    if (await client.action('resume')) setPanel(null);
+                  })();
+                }}
+                release={() => {
+                  void client.action('release');
+                }}
+                pending={client.pending}
+              />
+            ) : (
+              <div className="county-empty">
+                <p>{client.status}</p>
+                <button
+                  className="secondary"
+                  onClick={() => void client.poll()}
+                >
+                  Reconnect
+                </button>
+              </div>
+            ))}
           {panel === 'contracts' && (
             <div className="contract-list">
               {contracts.map((job, i) => (
@@ -747,7 +978,9 @@ export default function Home() {
                         upgradePrice(key, sim.career.upgrades[key])
                     }
                     onClick={() => {
-                      if (sim.buy(key)) save();
+                      if (mode === 'public') {
+                        void client.action('upgrade', { upgrade: key });
+                      } else if (sim.buy(key)) save();
                     }}
                   >
                     {sim.career.upgrades[key] >= 3
@@ -757,8 +990,9 @@ export default function Home() {
                 </article>
               ))}
               <p className="save-note">
-                Career and upgrades are saved in this browser. Earn your first
-                upgrade by completing a contract.
+                {mode === 'public'
+                  ? 'Your career and upgrades are saved to your signed-in pilot. Earn your first upgrade by completing a county contract.'
+                  : 'Practice career is saved only in this browser.'}
               </p>
             </div>
           )}
@@ -825,7 +1059,12 @@ export default function Home() {
   );
 }
 
-function drawMap(canvas: HTMLCanvasElement | null, sim: Simulation) {
+function drawMap(
+  canvas: HTMLCanvasElement | null,
+  sim: Simulation,
+  pilots: PublicPilot[] = [],
+  viewerId?: string | null,
+) {
   const ctx = canvas?.getContext('2d');
   if (!ctx || !canvas) return;
   const w = canvas.width,
@@ -914,6 +1153,21 @@ function drawMap(canvas: HTMLCanvasElement | null, sim: Simulation) {
   ctx.closePath();
   ctx.fill();
   ctx.restore();
+  for (const pilot of pilots) {
+    if (pilot.id === viewerId || pilot.phase !== 'flying') continue;
+    ctx.save();
+    ctx.translate(px(pilot.x), pz(pilot.z));
+    ctx.rotate(pilot.heading);
+    ctx.fillStyle = '#92ddff';
+    ctx.beginPath();
+    ctx.moveTo(0, -6);
+    ctx.lineTo(4, 4);
+    ctx.lineTo(0, 2);
+    ctx.lineTo(-4, 4);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+  }
 }
 
 function EngineSound({ sim, muted }: { sim: Simulation; muted: boolean }) {
