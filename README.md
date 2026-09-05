@@ -43,6 +43,12 @@ The unmodified generated component catalog has existing lint errors under the sc
 - R: refill and return to your claimed field. Enter: complete an eligible contract.
 - Touch controls support steering and spraying.
 
+## Graphics
+
+The landscape uses a warm afternoon sky with layered cumulus, distant patchwork fields, and a rippling river. Sky reflections add highlights to the water and aircraft. Instanced corn, soybeans, and pasture detail follow low flights throughout the playable county and respond to the season. Tree crowns and farm scenery provide landmarks during turns.
+
+Static scenery and aircraft parts are combined by material to reduce draw calls. Nearby crops use a bounded moving patch and fade with distance; detail is hidden at high altitude. The scene is procedural and adds no downloaded textures or rendering dependencies. Browser frame rates and visual appearance still need playtesting on target devices.
+
 ## Architecture and limits
 
 The initial shared alpha stays on the existing Sites/Cloudflare host with a D1 database. It uses four flight updates per second and interpolation for other aircraft; county jobs and standings refresh separately every four seconds. It does not yet use WebSockets, Durable Objects, or Supabase. A dedicated authoritative WebSocket service is the recommended next step before increasing population or demanding tighter flight synchronization. The current durable state and protocol can be migrated without importing client-trusted scores.
