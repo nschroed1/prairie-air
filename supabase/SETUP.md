@@ -6,7 +6,7 @@ Project: `jyclvsljxzszxjhpmsab` at `https://jyclvsljxzszxjhpmsab.supabase.co`.
 
 - Game: https://playprairieair.com (the original Workers address remains available).
 - Worker: `prairie-air` in the owner's Cloudflare account.
-- Deployment version: `03ad57b0-98aa-4d4c-8b0c-339e2000d25e`.
+- Deployment version: `1be5c32e-058f-45e9-97ac-e77ad25ec6f0`.
 - `COUNTY_STORAGE=supabase` is active. The Worker has no D1 binding.
 - Both supplied keys were verified without printing them. They are stored in Cloudflare Worker secrets and ignored local `.dev.vars` (mode 0600). The server secret is absent from compiled code, browser assets, and the deployment configuration. `/api/auth/config` intentionally returns only the project URL and publishable key.
 - Email/password sign-in and email confirmation are enabled. The project uses ES256 signing keys.
@@ -29,6 +29,7 @@ Hosting, password authentication, gameplay storage, and email-provider configura
 
 ## Validation
 
+- Reproduced a production Vinext client-router error that left account-to-county links stuck. Account and game links now use native navigation, matching the existing successful password-sign-in redirect. After deployment, browser checks verified `/auth` → `/` → `/auth`, with the county and Three.js scene loading and no new navigation errors. The signed-in return link uses the same native navigation; a full email callback and recovery test remains outstanding.
 - Cloudflare production build and Wrangler deployment dry run passed; deployment completed successfully.
 - Native HTTP checks returned 200 for `/`, `/auth`, `/api/auth/config`, and `/api/county`. The county returned all 60 contracts. Missing or forged authentication returns 401 for game writes.
 - Two temporary, email-confirmed QA users were created through the admin API without sending email. Both signed in with email/password, joined the same live county, and appeared in shared presence. Simultaneous claims produced one success and one 409 conflict, with a single visible owner. An incomplete contract could not earn a payout. Both users signed out and all their auth and gameplay records were deleted afterward.
