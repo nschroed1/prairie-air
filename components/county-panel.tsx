@@ -106,12 +106,12 @@ export function CountyPanel({
         </div>
       </div>
       <div className="county-flight-actions">
-        <button className="secondary" onClick={freeFlight}>
+        <button className="secondary" onClick={freeFlight} disabled={pending}>
           {county.player?.activeJob ? 'Resume my contract' : 'Free flight'}
           <Plane size={14} />
         </button>
         {county.player?.activeJob && (
-          <button className="secondary" onClick={release}>
+          <button className="secondary" onClick={release} disabled={pending}>
             Release my claim
           </button>
         )}

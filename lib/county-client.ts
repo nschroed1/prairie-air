@@ -13,6 +13,8 @@ export class CountyClient {
   online = false;
   status = 'Connecting to county…';
   pending = false;
+  actionPending = false;
+  private requestFinished: Promise<void> = Promise.resolve();
   steps: Step[] = [];
   disposed = false;
   timer: ReturnType<typeof setInterval> | null = null;
@@ -87,7 +89,7 @@ export class CountyClient {
     }
   }
   record(dt: number, input: Controls) {
-    if (!this.online) return;
+    if (!this.online || this.sim.phase !== 'flying') return;
     if (this.steps.length < 100) this.steps.push({ dt, input: { ...input } });
     else {
       this.online = false;
@@ -97,25 +99,42 @@ export class CountyClient {
     }
   }
   async action(action: Action, extra: Partial<CountyCommand> = {}) {
-    const deadline = Date.now() + 11000;
-    while (this.pending && Date.now() < deadline && !this.disposed)
-      await new Promise((resolve) => setTimeout(resolve, 40));
-    if (this.pending || this.disposed) return false;
-    if (!this.online) await this.poll();
-    if (!this.snapshot?.viewerId) {
-      this.notify('Sign in to your pilot account to fly in the public county.');
-      return false;
+    if (this.actionPending || this.disposed) return false;
+    this.actionPending = true;
+    this.changed();
+    const generation = this.flightGeneration;
+    try {
+      // Reserve the next request before waiting so background ticks cannot
+      // overtake a pilot's click. Use the completed response's revision.
+      await this.requestFinished;
+      if (this.disposed || generation !== this.flightGeneration) return false;
+      if (!this.online) await this.poll();
+      if (this.disposed || generation !== this.flightGeneration) return false;
+      if (!this.snapshot?.viewerId) {
+        this.notify(
+          'Sign in to your pilot account to fly in the public county.',
+        );
+        return false;
+      }
+      return await this.send(action, extra);
+    } finally {
+      this.actionPending = false;
+      this.changed();
     }
-    return this.send(action, extra);
   }
   async flush() {
-    if (this.pending || !this.online || this.disposed) return;
+    if (this.pending || this.actionPending || !this.online || this.disposed)
+      return;
     if (!this.steps.length && Date.now() - this.lastPoll < 3000) return;
     await this.send('tick');
   }
   async send(action: Action, extra: Partial<CountyCommand> = {}) {
     if (this.pending || this.disposed) return false;
     this.pending = true;
+    let finishRequest!: () => void;
+    this.requestFinished = new Promise<void>((resolve) => {
+      finishRequest = resolve;
+    });
     const generation = this.flightGeneration;
     const sent = this.steps.splice(0);
     const body = {
@@ -180,6 +199,7 @@ export class CountyClient {
       return false;
     } finally {
       this.pending = false;
+      finishRequest();
       this.changed();
     }
   }

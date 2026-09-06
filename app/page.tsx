@@ -345,11 +345,7 @@ export default function Home() {
             <small>YOUR EARNINGS</small>
             <strong>{money(sim.career.cash)}</strong>
           </div>
-          <a
-            className="avatar"
-            href="/auth"
-            aria-label="Manage pilot account"
-          >
+          <a className="avatar" href="/auth" aria-label="Manage pilot account">
             {mode === 'public' ? 'PA' : 'SOLO'}
           </a>
         </div>
@@ -435,7 +431,10 @@ export default function Home() {
               if (mode === 'public') void joinCounty();
               else start();
             }}
-            disabled={!ready || (mode === 'public' && !county?.viewerId)}
+            disabled={
+              !ready ||
+              (mode === 'public' && (!county?.viewerId || client.actionPending))
+            }
           >
             {ready
               ? mode === 'public'
@@ -895,7 +894,7 @@ export default function Home() {
                 release={() => {
                   void client.action('release');
                 }}
-                pending={client.pending}
+                pending={client.actionPending}
               />
             ) : (
               <div className="county-empty">
