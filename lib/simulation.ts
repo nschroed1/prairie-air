@@ -347,7 +347,9 @@ export class Simulation {
         }
         if (!applyCoverage) continue;
         const col = Math.floor((px - this.job.x + 228) / size);
-        const row = Math.floor(((pz - this.job.z + 226) / 452) * 38);
+        // Preserve the saved 12 m coverage grid; the bounds check above clips
+        // treatment to the actual field without shifting existing map cells.
+        const row = Math.floor((pz - this.job.z + 228) / size);
         if (col < 0 || col >= 38 || row < 0 || row >= 38) continue;
         const n = row * 38 + col;
         if (!this.covered.has(n)) {

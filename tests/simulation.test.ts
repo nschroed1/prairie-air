@@ -253,3 +253,17 @@ void test('older saved flights and completion receipts load without retroactive 
   assert.equal(restored.result.penalty, 0);
   assert.equal(restored.result.total, 1650);
 });
+
+void test('coverage at field edges stays on the existing saved map grid', () => {
+  const sim = new Simulation();
+  sim.reset();
+  sim.paint(0, -210, 0.01);
+  assert.deepEqual(
+    [...new Set([...sim.covered].map((n) => Math.floor(n / 38)))].sort(),
+    [1, 2],
+    'The footprint matches the rows rendered by the existing world and map',
+  );
+  sim.paint(0, 225, 0.01);
+  assert.ok([...sim.covered].some((n) => Math.floor(n / 38) === 37));
+  assert.ok([...sim.covered].every((n) => Math.floor(n / 38) < 38));
+});
