@@ -83,7 +83,7 @@ export function lineUpLesson(sim: Simulation) {
 // This is a conservative preview; it never changes treatment or payment.
 export function sprayFootprint(sim: Simulation, ahead = 0) {
   const x = sim.x + sim.sprayDrift + Math.sin(sim.heading) * sim.speed * ahead;
-  const z = sim.z - Math.cos(sim.heading) * sim.speed * ahead;
+  const z = sim.z + sim.sprayDriftZ - Math.cos(sim.heading) * sim.speed * ahead;
   const half = sim.swath / 2;
   const depth = sim.speed * 0.05 + 9;
   return [

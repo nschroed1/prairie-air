@@ -31,7 +31,7 @@ Apply the initial local migration once to an empty database. Additional migratio
 ```sh
 npx tsc --noEmit
 npx oxlint app lib db components/county-panel.tsx tests/county.test.ts
-npx tsx --test tests/auth.test.ts tests/county-client.test.ts tests/county.test.ts tests/simulation.test.ts tests/flight-guidance.test.ts tests/supabase-store.test.ts
+npx tsx --test tests/auth.test.ts tests/county-client.test.ts tests/county.test.ts tests/simulation.test.ts tests/flight-guidance.test.ts tests/weather.test.ts tests/supabase-store.test.ts
 npm run build
 ```
 
@@ -56,9 +56,17 @@ Automated flight-step tests verify that the starter guide advances through four 
 - R: refill and return to your claimed field. Enter: complete an eligible contract.
 - Touch controls support steering and spraying.
 
+## Weather and rural life
+
+Clear skies, prairie haze, overcast conditions, and light showers change the sky, cloud cover, sunlight, visibility, rain streaks, and wind. The public county gets a deterministic forecast every 30 minutes, shared by spectators and pilots. The server includes that forecast in its flight state; pending inputs replay under their existing weather before a new forecast takes effect. Wind and gusts affect aircraft movement and spray drift in both directions, with stability upgrades reducing the effect. Old saved flights remain compatible.
+
+Practice rolls a new forecast on each flight. The starter stays clear with its gentle west breeze, while the crosswind lesson keeps a west wind with varied skies. The HUD and preflight briefing show the forecast and wind speed.
+
+Cows with patched coats, woolly sheep, horned goats, and farm workers populate pastures and fenced farmyard pens. Workers walk around barns and along road verges and wave at low aircraft; animals graze and move gently. Placement is deterministic across the county. Four instanced species batches draw only nearby residents, capped at 96 per species, fading beyond 300 m and above 120 m AGL and disappearing by about 420 m distance or 175 m AGL. Farm clearings keep tall crops out of the pens and yards.
+
 ## Graphics
 
-The landscape uses a warm afternoon sky with layered cumulus, distant patchwork fields, and a rippling river. Sky reflections add highlights to the water and aircraft. Instanced corn, soybeans, and pasture detail follow low flights throughout the playable county and respond to the season. Tree crowns and farm scenery provide landmarks during turns.
+The landscape uses a changing daytime sky with layered cumulus, distant patchwork fields, and a rippling river. Sky reflections add highlights to the water and aircraft. Instanced corn, soybeans, and pasture detail follow low flights throughout the playable county and respond to the season. Tree crowns and farm scenery provide landmarks during turns.
 
 Static scenery and aircraft parts are combined by material to reduce draw calls. Nearby crops use a bounded moving patch and fade with distance; detail is hidden at high altitude. The scene is procedural and adds no downloaded textures or rendering dependencies. Browser frame rates and visual appearance still need playtesting on target devices.
 

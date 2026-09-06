@@ -9,6 +9,9 @@ import {
   Plane,
   Wind,
   Sun,
+  Cloud,
+  CloudRain,
+  Haze,
   Pause,
   Play,
   Volume2,
@@ -46,6 +49,7 @@ import {
 } from '@/lib/simulation';
 import { registerFlightTools, registerCountyTools } from '@/lib/webmcp';
 import type { World } from '@/lib/world';
+import { LESSON_WEATHER, practiceWeather, windLabel } from '@/lib/weather';
 import { CountyClient } from '@/lib/county-client';
 import { CountyPanel } from '@/components/county-panel';
 import {
@@ -277,6 +281,10 @@ export default function Home() {
       void onlineAction('retry');
       return;
     }
+    sim.weather = practiceWeather(
+      job.id,
+      Math.floor(Math.random() * 0xffffffff),
+    );
     sim.reset(job);
     sim.phase = 'paused';
     setPanel('briefing');
@@ -327,6 +335,7 @@ export default function Home() {
         localStorage.getItem('prairie-air-practice-bests-v1'),
       );
     } catch {}
+    sim.weather = practiceWeather(0, 0);
     sim.reset(contracts[0]);
     sim.phase = 'paused';
     setGuideEnabled(true);
@@ -343,6 +352,16 @@ export default function Home() {
     fly = sim.phase === 'flying';
   const heading =
     ((Math.round((sim.heading * 180) / Math.PI) % 360) + 360) % 360;
+  const weather =
+    (mode === 'public' ? county?.weather : sim.weather) ?? LESSON_WEATHER;
+  const WeatherIcon =
+    weather.kind === 'rain'
+      ? CloudRain
+      : weather.kind === 'overcast'
+        ? Cloud
+        : weather.kind === 'haze'
+          ? Haze
+          : Sun;
   const safety = spraySafety(sim);
   const hasAssignment =
     mode === 'practice' || Boolean(county?.player?.activeJob);
@@ -443,22 +462,27 @@ export default function Home() {
             : 'CONNECTING TO COUNTY'}
         <span className="live-dot" />
       </button>
-      <div className="weather">
-        <Sun size={23} />
+      <div
+        className="weather"
+        title={
+          mode === 'public'
+            ? 'Shared county forecast · changes every 30 minutes'
+            : 'Weather is rolled for each practice flight; the starter stays gentle'
+        }
+      >
+        <WeatherIcon size={23} />
         <div>
           <strong>
-            72° <span>Clear skies</span>
+            {weather.temperature}° <span>{weather.label}</span>
           </strong>
           <small>
             <Wind size={13} />{' '}
-            {mode === 'practice' && active
-              ? sim.job.id === 0
-                ? 'Gentle west breeze'
-                : sim.job.id === 1
-                  ? 'Strong west wind'
-                  : 'West breeze'
-              : 'SW 6 kt'}{' '}
-            <span>·</span> 8:42 AM
+            {windLabel(
+              weather,
+              mode === 'practice' ? (sim.job.windStrength ?? 1) : 1,
+            )}{' '}
+            <span>·</span>{' '}
+            {mode === 'public' ? 'County forecast' : 'Practice forecast'}
           </small>
         </div>
       </div>
@@ -992,6 +1016,7 @@ export default function Home() {
           {panel === 'briefing' && (
             <FlightBriefing
               job={sim.job}
+              weather={sim.weather}
               onFly={() => {
                 Object.assign(controls.current, freshControls());
                 sim.phase = 'flying';

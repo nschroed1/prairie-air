@@ -16,6 +16,7 @@ import {
   type CountyCommand,
 } from '../lib/county';
 import { freshControls } from '../lib/simulation';
+import { WEATHER_PERIOD } from '../lib/weather';
 
 class TestStatement {
   args: SQLInputValue[] = [];
@@ -93,6 +94,27 @@ function setup() {
   };
   return { db, service, command, advance: (ms: number) => (now += ms) };
 }
+
+void test('the server supplies one county forecast to spectators and both pilots, then rolls it forward', async () => {
+  const { command, service, advance } = setup();
+  const a = await command('weather-alice', 'join');
+  const b = await command('weather-bob', 'join');
+  const spectator = await service.snapshot(null);
+  assert.deepEqual(a.weather, b.weather);
+  assert.deepEqual(a.weather, spectator.weather);
+  assert.deepEqual(a.player!.flight.weather, a.weather);
+  assert.equal(
+    a.player!.flight.job.windStrength,
+    undefined,
+    'Public free flight does not inherit the practice lesson wind multiplier',
+  );
+  advance(WEATHER_PERIOD);
+  const later = await command('weather-alice', 'tick');
+  const other = await command('weather-bob', 'tick');
+  assert.notEqual(later.weather!.id, a.weather!.id);
+  assert.deepEqual(later.weather, other.weather);
+  assert.deepEqual(later.player!.flight.weather, later.weather);
+});
 
 void test('simultaneous claims have one winner and leave the loser without a reservation', async () => {
   const { command, service } = setup();

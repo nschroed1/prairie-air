@@ -12,6 +12,14 @@ import {
 } from './simulation';
 
 import { nextPass, sprayFootprint, spraySafety } from './flight-guidance';
+import {
+  RuralLife,
+  FARMSTEADS,
+  FARM_CLEARINGS,
+  PADDOCKS,
+  inFarmClearing,
+} from './rural-life';
+import { LESSON_WEATHER, windVector, type Weather } from './weather';
 
 function random(seed = 1701) {
   return () => {
@@ -90,6 +98,15 @@ export class World {
   sky: T.Mesh | null = null;
   environmentTarget: T.WebGLRenderTarget | null = null;
   windTime = { value: 0 };
+  ruralLife: RuralLife;
+  countyForecast: Weather | null = null;
+  weatherCover = { value: 0.08 };
+  cloudMaterial: T.MeshStandardMaterial | null = null;
+  cloudMesh: T.InstancedMesh | null = null;
+  rainLevel = 0;
+  rainPositions = new Float32Array(900 * 6);
+  rain: T.LineSegments;
+  weatherColor = new T.Color();
   cropDetail: Partial<Record<Field['crop'], T.InstancedMesh>> = {};
   detailCell = '';
   foliageMaterials: { material: T.MeshStandardMaterial; color: T.Color }[] = [];
@@ -138,6 +155,23 @@ export class World {
     this.createLand();
     this.createFarms();
     this.batchStatic(this.scene);
+    this.ruralLife = new RuralLife(this.scene);
+    const rainGeometry = new T.BufferGeometry();
+    rainGeometry.setAttribute(
+      'position',
+      new T.BufferAttribute(this.rainPositions, 3).setUsage(T.DynamicDrawUsage),
+    );
+    this.rain = new T.LineSegments(
+      rainGeometry,
+      new T.LineBasicMaterial({
+        color: '#c7dfe9',
+        transparent: true,
+        opacity: 0,
+        depthWrite: false,
+      }),
+    );
+    this.rain.frustumCulled = false;
+    this.scene.add(this.rain);
     this.createPlane();
     this.detailPlane();
     this.batchStatic(this.plane, this.prop);
@@ -267,11 +301,15 @@ export class World {
     const material = new T.ShaderMaterial({
       side: T.BackSide,
       depthWrite: false,
-      uniforms: { sunDirection: { value: SUN_OFFSET.clone().normalize() } },
+      uniforms: {
+        sunDirection: { value: SUN_OFFSET.clone().normalize() },
+        weatherCover: this.weatherCover,
+      },
       vertexShader: `varying vec3 vDirection;
         void main(){vDirection=position;gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0);}`,
       fragmentShader: `varying vec3 vDirection;
         uniform vec3 sunDirection;
+        uniform float weatherCover;
         float hash(vec2 p){return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453);}
         float noise(vec2 p){vec2 i=floor(p),f=fract(p);f=f*f*(3.0-2.0*f);
           return mix(mix(hash(i),hash(i+vec2(1.,0.)),f.x),mix(hash(i+vec2(0.,1.)),hash(i+vec2(1.,1.)),f.x),f.y);}
@@ -287,6 +325,9 @@ export class World {
           float cirrus=noise(wisps)+noise(wisps*2.2)*.4;
           cirrus=smoothstep(.88,1.3,cirrus)*smoothstep(.14,.5,height)*.15;
           color=mix(color,vec3(.82,.89,.92),cirrus);
+          vec3 graySky=mix(vec3(.55,.62,.64),vec3(.30,.38,.44),pow(height,.55));
+          graySky+=noise(wisps*.7)*.075;
+          color=mix(color,graySky,weatherCover*.94);
           gl_FragColor=vec4(color,1.0);
           #include <tonemapping_fragment>
           #include <colorspace_fragment>
@@ -296,6 +337,7 @@ export class World {
     this.sky.renderOrder = -2;
     this.scene.add(this.sky);
     const cloudMaterial = mat('#f5f1df', { roughness: 1 });
+    this.cloudMaterial = cloudMaterial;
     cloudMaterial.onBeforeCompile = (shader) => {
       shader.vertexShader = 'varying float vCloudY;\n' + shader.vertexShader;
       shader.vertexShader = shader.vertexShader.replace(
@@ -339,6 +381,7 @@ export class World {
         clouds.setMatrixAt(index++, dummy.matrix);
       }
     }
+    this.cloudMesh = clouds;
     clouds.frustumCulled = false;
     this.cloudGroup.add(clouds);
     this.scene.add(this.cloudGroup);
@@ -759,7 +802,8 @@ export class World {
         if (
           !field ||
           Math.abs(x - field.x) > 224 ||
-          Math.abs(z - field.z) > 222
+          Math.abs(z - field.z) > 222 ||
+          inFarmClearing(x, z)
         )
           continue;
         // Hash absolute plant coordinates so overlapping tiles keep identical plants.
@@ -795,18 +839,7 @@ export class World {
       white = mat('#e6e6cd'),
       dark = mat('#35473c'),
       silo = mat('#b3bdba', { metalness: 0.35, roughness: 0.5 });
-    const farms = [
-      [-315, -195],
-      [-680, 140],
-      [-370, -735],
-      [500, -720],
-      [-1200, 780],
-      [1680, 220],
-      [-1730, -700],
-      [1920, -1300],
-      [30, -1640],
-    ];
-    for (const [x, z] of farms) {
+    for (const [x, z] of FARMSTEADS) {
       const p = new T.Group();
       p.position.set(x, ground(x, z), z);
       p.rotation.y = rng() * 0.5;
@@ -862,23 +895,66 @@ export class World {
     }
     hay.castShadow = true;
     this.scene.add(hay);
-    // Pasture cattle and a familiar rural water tower.
-    const cows = new T.InstancedMesh(
-      new T.BoxGeometry(3, 2, 1.7),
-      mat('#eee8d3'),
-      90,
-    );
-    for (let i = 0; i < 90; i++) {
-      const x = -1020 + (rng() - 0.5) * 400,
-        z = 510 + (rng() - 0.5) * 400;
-      dummy.position.set(x, ground(x, z) + 1.4, z);
-      dummy.rotation.set(0, rng() * 6, 0);
-      dummy.scale.setScalar(1);
-      dummy.updateMatrix();
-      cows.setMatrixAt(i, dummy.matrix);
-      if (i % 3 === 0) cows.setColorAt(i, new T.Color('#48473b'));
+    const yardGrass = mat('#799257');
+    for (const area of FARM_CLEARINGS)
+      this.landPatch(
+        area.width,
+        area.depth,
+        area.x,
+        area.z,
+        yardGrass,
+        0.32,
+        8,
+      );
+    // Low rail fences make mixed farmyard herds read as paddocks from the air.
+    for (const pen of PADDOCKS) {
+      const points: [number, number][] = [];
+      for (let side = -1; side <= 1; side += 2) {
+        for (let step = 0; step <= 7; step++)
+          points.push([
+            pen.x - pen.width / 2 + (step * pen.width) / 7,
+            pen.z + (side * pen.depth) / 2,
+          ]);
+        for (let step = 1; step < 5; step++)
+          points.push([
+            pen.x + (side * pen.width) / 2,
+            pen.z - pen.depth / 2 + (step * pen.depth) / 5,
+          ]);
+      }
+      for (const [x, z] of points)
+        this.box(0.22, 1.5, 0.22, white, x, ground(x, z) + 0.95, z);
+      for (const height of [0.85, 1.35]) {
+        for (const side of [-1, 1]) {
+          for (let step = 0; step < 7; step++) {
+            const x = pen.x - pen.width / 2 + ((step + 0.5) * pen.width) / 7,
+              z = pen.z + (side * pen.depth) / 2;
+            this.box(
+              pen.width / 7,
+              0.12,
+              0.12,
+              white,
+              x,
+              ground(x, z) + height,
+              z,
+            );
+          }
+          for (let step = 0; step < 5; step++) {
+            const x = pen.x + (side * pen.width) / 2,
+              z = pen.z - pen.depth / 2 + ((step + 0.5) * pen.depth) / 5;
+            this.box(
+              0.12,
+              0.12,
+              pen.depth / 5,
+              white,
+              x,
+              ground(x, z) + height,
+              z,
+            );
+          }
+        }
+      }
     }
-    this.scene.add(cows);
+    // A familiar rural water tower.
     const tx = -500,
       tz = -1100,
       ty = ground(tx, tz);
@@ -1240,6 +1316,7 @@ export class World {
     this.coverageMesh.instanceMatrix.needsUpdate = true;
   }
   updateParticles(dt: number) {
+    const wind = this.sim.windVector;
     if (this.sim.spraying) {
       this.particleEmission += dt * 440;
       const emitted = Math.floor(this.particleEmission);
@@ -1259,8 +1336,10 @@ export class World {
     for (let i = 0; i < 700; i++) {
       if (this.particleLife[i] > 0) {
         this.particleLife[i] -= dt;
-        this.particlePositions[i * 3] += (1.2 + Math.sin(i * 0.7) * 0.4) * dt;
-        this.particlePositions[i * 3 + 2] += 0.5 * dt;
+        this.particlePositions[i * 3] +=
+          (wind.x + Math.sin(i * 0.7) * 0.18) * dt;
+        this.particlePositions[i * 3 + 2] +=
+          (wind.z + Math.cos(i * 0.6) * 0.12) * dt;
         this.particleAlpha[i] = Math.min(1, this.particleLife[i] * 1.5);
         this.particlePositions[i * 3 + 1] -= dt * 6;
       } else {
@@ -1279,6 +1358,57 @@ export class World {
     this.camera.updateProjectionMatrix();
     this.renderer.setSize(w, h);
   }
+  updateWeather(dt: number) {
+    const forecast = this.countyForecast ?? this.sim.weather ?? LESSON_WEATHER;
+    const blend = 1 - Math.exp(-dt * 0.6);
+    this.weatherCover.value +=
+      (forecast.cloud - this.weatherCover.value) * blend;
+    this.sun.intensity += (forecast.sunlight - this.sun.intensity) * blend;
+    this.sun.color.lerp(
+      this.weatherColor.set(forecast.cloud > 0.7 ? '#dce8ee' : '#ffe3a8'),
+      blend,
+    );
+    const fog = this.scene.fog as T.FogExp2;
+    fog.density += (forecast.fog - fog.density) * blend;
+    fog.color.lerp(
+      this.weatherColor.set(
+        forecast.kind === 'haze'
+          ? '#d6d2b2'
+          : forecast.cloud > 0.7
+            ? '#abbfc5'
+            : '#c4d8ca',
+      ),
+      blend,
+    );
+    this.cloudMaterial?.color.lerp(
+      this.weatherColor.set(forecast.cloud > 0.7 ? '#a6b5bb' : '#f5f1df'),
+      blend,
+    );
+    if (this.cloudMesh)
+      this.cloudMesh.count = Math.round(170 + this.weatherCover.value * 310);
+    this.scene.environmentIntensity = 0.38 - this.weatherCover.value * 0.16;
+    this.rainLevel += (forecast.rain - this.rainLevel) * blend;
+    this.rain.visible = this.rainLevel > 0.01;
+    if (!this.rain.visible) return;
+    const count = Math.floor(900 * this.rainLevel),
+      wind = windVector(forecast, this.time);
+    (this.rain.material as T.LineBasicMaterial).opacity = this.rainLevel * 0.38;
+    for (let i = 0; i < count; i++) {
+      const x = this.camera.position.x + ((i * 73.137) % 180) - 90;
+      const y =
+        this.camera.position.y + 85 - ((this.time * 34 + i * 19.31) % 145);
+      const z = this.camera.position.z + ((i * 31.717) % 180) - 90;
+      const n = i * 6;
+      this.rainPositions[n] = x;
+      this.rainPositions[n + 1] = y;
+      this.rainPositions[n + 2] = z;
+      this.rainPositions[n + 3] = x - wind.x * 0.13;
+      this.rainPositions[n + 4] = y + 1.6;
+      this.rainPositions[n + 5] = z - wind.z * 0.13;
+    }
+    this.rain.geometry.setDrawRange(0, count * 2);
+    this.rain.geometry.attributes.position.needsUpdate = true;
+  }
   animate = (ms: number) => {
     if (this.disposed) return;
     const dt = this.last ? Math.min((ms - this.last) / 1000, 0.05) : 0.016;
@@ -1289,6 +1419,7 @@ export class World {
     this.sim.step(dt, this.input);
     this.updatePlane();
     this.updateCropDetail();
+    this.ruralLife.update(this.time, this.sim.x, this.sim.z, this.sim.altitude);
     this.updateMarker();
     this.updateCoverage();
     this.updateGuides();
@@ -1312,11 +1443,17 @@ export class World {
     if (preview)
       look.copy(this.plane.position).add(new T.Vector3(-70, -12, -80));
     this.camera.lookAt(look);
+    this.updateWeather(dt);
     this.sky?.position.copy(this.camera.position);
     this.plane.visible = this.cameraMode !== 1;
     this.sun.position.copy(this.plane.position).add(SUN_OFFSET);
     this.sun.target.position.copy(this.plane.position);
-    this.cloudGroup.position.x = Math.sin(this.time * 0.003) * 140;
+    const cloudWind = windVector(
+      this.countyForecast ?? this.sim.weather ?? LESSON_WEATHER,
+      this.time,
+    );
+    this.cloudGroup.position.x += cloudWind.x * dt * 0.5;
+    this.cloudGroup.position.z += cloudWind.z * dt * 0.5;
     this.plane.updateMatrixWorld();
     this.updateParticles(dt);
     for (const { mesh, target } of this.otherPilots.values()) {
@@ -1334,6 +1471,7 @@ export class World {
     this.frame = requestAnimationFrame(this.animate);
   };
   setCounty(county: CountySnapshot | null) {
+    this.countyForecast = county?.weather ?? null;
     this.guidanceAvailable = !county || Boolean(county.player?.activeJob);
     const live =
       county?.pilots.filter(

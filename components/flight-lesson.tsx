@@ -19,6 +19,8 @@ import {
   type PracticeBest,
 } from '@/lib/flight-guidance';
 
+import { windLabel, type Weather } from '@/lib/weather';
+
 const money = (n: number) => '$' + Math.round(n).toLocaleString('en-US');
 const duration = (seconds: number) =>
   `${Math.floor(seconds / 60)}:${String(Math.floor(seconds % 60)).padStart(2, '0')}`;
@@ -85,8 +87,10 @@ export function FieldPlot({
 export function FlightBriefing({
   job,
   onFly,
+  weather,
 }: {
   job: Contract;
+  weather?: Weather | null;
   onFly: () => void;
 }) {
   return (
@@ -95,11 +99,13 @@ export function FlightBriefing({
       <div>
         <span className="lesson-kicker">
           <Wind size={15} />{' '}
-          {job.id === 0
-            ? 'Gentle breeze · about 3 minutes'
-            : job.id === 1
-              ? 'Strong west wind · about 4 minutes'
-              : job.difficulty}
+          {weather
+            ? `${weather.label} · ${windLabel(weather, job.windStrength ?? 1)}`
+            : job.id === 0
+              ? 'Gentle breeze · about 3 minutes'
+              : job.id === 1
+                ? 'Strong west wind · about 4 minutes'
+                : job.difficulty}
         </span>
         <p>{job.briefing ?? job.note}</p>
         <ol className="lesson-steps">

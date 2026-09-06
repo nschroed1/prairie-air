@@ -1,3 +1,4 @@
+import { countyWeather } from '../weather';
 import {
   D1CountyStore,
   liveWindow,
@@ -92,6 +93,7 @@ export class CountyService {
     });
     return {
       compact,
+      weather: countyWeather(now),
       season,
       jobs: compact ? [] : jobs,
       pilots,
@@ -174,6 +176,11 @@ export class CountyService {
         409,
       );
     }
+    // Apply a county-wide forecast after replaying already-recorded inputs.
+    // Clients receive the new weather with this authoritative flight state.
+    sim.weather = countyWeather(now);
+    if (active === null && sim.job.windStrength !== undefined)
+      sim.job = { ...sim.job, windStrength: undefined };
     let selected =
       active === null
         ? null

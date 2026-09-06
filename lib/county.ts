@@ -1,3 +1,4 @@
+import type { Weather } from './weather';
 import {
   fields,
   Simulation,
@@ -115,6 +116,7 @@ export function seasonJobs(season: Season): CountyJob[] {
   });
 }
 export type FlightState = {
+  weather?: Weather | null;
   x: number;
   y: number;
   z: number;
@@ -136,6 +138,7 @@ export type FlightState = {
 };
 export function serialize(sim: Simulation): FlightState {
   return {
+    weather: sim.weather,
     x: sim.x,
     y: sim.y,
     z: sim.z,
@@ -295,6 +298,7 @@ export type Standing = {
   precision: number;
 };
 export type CountySnapshot = {
+  weather?: Weather;
   compact?: boolean;
   season: Season;
   jobs: CountyJob[];

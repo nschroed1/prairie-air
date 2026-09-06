@@ -1,3 +1,5 @@
+import { windVector, type Weather } from './weather';
+
 export const clamp = (v: number, min: number, max: number) =>
   Math.max(min, Math.min(max, v));
 export const ground = (x: number, z: number) =>
@@ -172,6 +174,7 @@ export const fieldCellCount = (job: Contract) => {
 };
 export class Simulation {
   phase: Phase = 'ready';
+  weather: Weather | null = null;
   career: Career = freshCareer();
   job: Contract = contracts[0];
   x = -170;
@@ -236,12 +239,27 @@ export class Simulation {
       this.speed < 61
     );
   }
+  get windVector() {
+    if (this.weather)
+      return windVector(
+        this.weather,
+        this.elapsed,
+        this.job.windStrength ?? 1,
+        this.career.upgrades.stability,
+      );
+    return {
+      x:
+        ((Math.sin(this.elapsed * 0.8) * 0.32 + 0.65) *
+          (this.job.windStrength ?? 1)) /
+        (1 + this.career.upgrades.stability * 0.6),
+      z: 0,
+    };
+  }
   get wind() {
-    return (
-      ((Math.sin(this.elapsed * 0.8) * 0.32 + 0.65) *
-        (this.job.windStrength ?? 1)) /
-      (1 + this.career.upgrades.stability * 0.6)
-    );
+    return this.windVector.x;
+  }
+  get sprayDriftZ() {
+    return this.windVector.z * this.altitude * 0.16;
   }
   get sprayDrift() {
     return this.wind * this.altitude * 0.16;
@@ -337,9 +355,9 @@ export class Simulation {
     );
     this.speed += (this.throttle - this.speed) * dt * 1.8;
     this.heading -= this.roll * dt * 0.9;
-    const wind = this.wind;
-    this.x += (Math.sin(this.heading) * this.speed + wind) * dt;
-    this.z -= Math.cos(this.heading) * this.speed * dt;
+    const wind = this.windVector;
+    this.x += (Math.sin(this.heading) * this.speed + wind.x) * dt;
+    this.z += (-Math.cos(this.heading) * this.speed + wind.z) * dt;
     this.y += Math.sin(this.pitch) * this.speed * dt;
     this.y = Math.min(this.y, 600);
     if (
@@ -361,8 +379,8 @@ export class Simulation {
     // Off-field discharge still counts when height, speed, or bank prevents
     // useful treatment. Drift and the whole boom footprint affect the penalty.
     this.paint(
-      this.x + wind * this.altitude * 0.16,
-      this.z,
+      this.x + wind.x * this.altitude * 0.16,
+      this.z + wind.z * this.altitude * 0.16,
       sprayDt,
       this.validSpray,
     );
