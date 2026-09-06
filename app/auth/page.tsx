@@ -1,6 +1,6 @@
 'use client';
+/* oxlint-disable next/no-html-link-for-pages -- Native navigation avoids the deployed Vinext router failure and reloads the game with the persisted pilot session. */
 import { useEffect, useState, type SubmitEvent } from 'react';
-import Link from 'next/link';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { Plane, ArrowLeft, Mail, ShieldCheck } from 'lucide-react';
 import { Input } from '@/components/ui/input';
@@ -155,9 +155,9 @@ export default function PilotAccount() {
   const signedIn = account && view !== 'reset';
   return (
     <main className="pilot-auth">
-      <Link href="/" className="auth-back">
+      <a href="/" className="auth-back">
         <ArrowLeft size={18} /> Back to the county
-      </Link>
+      </a>
       <section className="auth-card" aria-labelledby="auth-title">
         <div className="auth-brand">
           <Plane size={28} />
@@ -182,9 +182,9 @@ export default function PilotAccount() {
           <output>Opening your account…</output>
         ) : signedIn ? (
           <div className="auth-actions">
-            <Link className="auth-primary-link" href="/">
+            <a className="auth-primary-link" href="/">
               Return to the county <Plane size={18} />
-            </Link>
+            </a>
             <Button
               variant="outline"
               disabled={busy}

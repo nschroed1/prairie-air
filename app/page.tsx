@@ -1,10 +1,9 @@
 'use client';
 
-/* oxlint-disable next/no-html-link-for-pages -- Sites sign-in must use a top-level native anchor, not the app router. */
+/* oxlint-disable next/no-html-link-for-pages -- Native navigation keeps account and game links working around the deployed Vinext router failure. */
 /* oxlint-disable react/react-compiler -- The Three.js engine is an intentionally mutable external system; HUD state is refreshed on an explicit timer, and this component opts out of compiler memoization. */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import Link from 'next/link';
 import {
   ArrowUpRight,
   Plane,
@@ -293,7 +292,7 @@ export default function Home() {
       <div ref={mount} className="world-canvas" />
       <div className="screen-shade" />
       <header className="topbar">
-        <Link className="brand" href="/" aria-label="Prairie Air home">
+        <a className="brand" href="/" aria-label="Prairie Air home">
           <span className="brand-icon">
             <Plane size={24} />
           </span>
@@ -301,7 +300,7 @@ export default function Home() {
             PRAIRIE<span className="brand-air">AIR</span>
             <small>A LITTLE CLOSER TO THE LAND</small>
           </span>
-        </Link>
+        </a>
         <nav aria-label="Game navigation">
           <button
             className={!panel ? 'nav-active' : ''}
@@ -346,13 +345,13 @@ export default function Home() {
             <small>YOUR EARNINGS</small>
             <strong>{money(sim.career.cash)}</strong>
           </div>
-          <Link
+          <a
             className="avatar"
             href="/auth"
             aria-label="Manage pilot account"
           >
             {mode === 'public' ? 'PA' : 'SOLO'}
-          </Link>
+          </a>
         </div>
       </header>
       <div className="location">
@@ -446,17 +445,17 @@ export default function Home() {
             <ArrowUpRight size={21} />
           </button>
           {mode === 'public' && county && !county.viewerId && (
-            <Link className="signin-link" href="/auth">
+            <a className="signin-link" href="/auth">
               Sign in or create your pilot account
-            </Link>
+            </a>
           )}
           <button className="practice-link" onClick={practice}>
             Solo practice
           </button>
           {county?.viewerId && (
-            <Link href="/auth" className="signin-link">
+            <a href="/auth" className="signin-link">
               Manage pilot account
-            </Link>
+            </a>
           )}
           <span className="launch-note">
             {mode === 'public'

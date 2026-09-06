@@ -1,7 +1,6 @@
 'use client';
-/* oxlint-disable next/no-html-link-for-pages -- Sites sign-in requires top-level native navigation. */
+/* oxlint-disable next/no-html-link-for-pages -- Native account navigation avoids the deployed Vinext router failure. */
 import { useState } from 'react';
-import Link from 'next/link';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Input } from '@/components/ui/input';
 import { Progress } from '@/components/ui/progress';
@@ -117,9 +116,9 @@ export function CountyPanel({
           </button>
         )}
         {!county.viewerId && (
-          <Link href="/auth" className="signin-link">
+          <a href="/auth" className="signin-link">
             Sign in to fly
-          </Link>
+          </a>
         )}
       </div>
       <Tabs defaultValue={initialTab}>
