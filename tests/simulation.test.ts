@@ -8,7 +8,9 @@ import {
   ground,
   loadCareer,
   freshCareer,
+  OVERSPRAY_PENALTY_PER_ACRE,
 } from '../lib/simulation';
+import { hydrate, serialize, type FlightState } from '../lib/county';
 
 void test('starting each contract places aircraft at safe spraying altitude by the correct crop', () => {
   const sim = new Simulation();
@@ -120,4 +122,134 @@ void test('career saves round trip and invalid browser storage recovers safely',
   assert.deepEqual(loadCareer(JSON.stringify(career)), career);
   for (const raw of [null, 'broken', 'null', '{}', '{"cash":-30}'])
     assert.deepEqual(loadCareer(raw), freshCareer());
+});
+
+void test('overspray measures the part of the boom outside the actual field, including repeated discharge', () => {
+  const sim = new Simulation();
+  sim.reset();
+  sim.paint(0, 0, 0.05);
+  assert.equal(sim.oversprayAcres, 0);
+  sim.x = 220;
+  sim.z = 0;
+  assert.equal(
+    sim.inField,
+    true,
+    'The aircraft center can be inside while its boom crosses the edge',
+  );
+  sim.paint(220, 0, 0.05);
+  const edge = sim.oversprayAcres;
+  assert.ok(edge > 0);
+  assert.ok(sim.offTargetFraction > 0 && sim.offTargetFraction < 1);
+  const coverage = sim.coverage;
+  sim.paint(600, 0, 0.05);
+  const fullSwath = sim.oversprayAcres - edge;
+  assert.ok(fullSwath > edge);
+  assert.equal(sim.offTargetFraction, 1);
+  assert.equal(sim.coverage, coverage);
+  sim.paint(600, 0, 0.05);
+  assert.ok(Math.abs(sim.oversprayAcres - edge - fullSwath * 2) < 1e-10);
+  const end = new Simulation();
+  end.reset();
+  end.heading = Math.PI / 2;
+  end.paint(0, 227, 0.05);
+  assert.ok(
+    end.oversprayAcres > 0,
+    'The real north/south field edge is 226 m from center',
+  );
+});
+
+void test('off-field acreage scales with time and boom width rather than frame count', () => {
+  const amount = (frames: number, boom = 0) => {
+    const sim = new Simulation();
+    sim.reset();
+    sim.career.upgrades.boom = boom;
+    for (let i = 0; i < frames; i++) sim.paint(600, 0, 1 / frames);
+    return sim.oversprayAcres;
+  };
+  assert.ok(Math.abs(amount(20) - amount(120)) < 1e-10);
+  assert.ok(Math.abs(amount(60, 3) / amount(60) - 112 / 58) < 1e-10);
+});
+
+void test('banked or high off-field spraying still incurs a penalty, but idle and empty aircraft do not', () => {
+  const sim = new Simulation();
+  sim.reset();
+  sim.x = 600;
+  sim.z = 0;
+  sim.y = ground(sim.x, sim.z) + 70;
+  sim.roll = 0.7;
+  sim.step(0.05, { ...freshControls(), spray: true, left: true });
+  assert.ok(sim.oversprayAcres > 0);
+  assert.equal(sim.coverage, 0);
+  assert.equal(sim.overspraying, true);
+  const sprayed = sim.oversprayAcres;
+  sim.step(0.05, freshControls());
+  assert.equal(sim.overspraying, false);
+  sim.phase = 'paused';
+  sim.step(0.05, { ...freshControls(), spray: true });
+  assert.equal(sim.oversprayAcres, sprayed);
+  sim.phase = 'flying';
+  sim.tank = 0;
+  sim.step(0.05, { ...freshControls(), spray: true });
+  assert.equal(sim.oversprayAcres, sprayed);
+  sim.tank = 0.00001;
+  sim.step(0.05, { ...freshControls(), spray: true });
+  assert.ok(
+    sim.oversprayAcres - sprayed < 0.00002,
+    'Only charge for the last liquid actually released',
+  );
+});
+
+void test('overspray survives refill and serialization; restarting starts a fresh attempt', () => {
+  const sim = new Simulation();
+  sim.reset();
+  sim.paint(600, 0, 0.05);
+  sim.paint(0, 0, 0.05);
+  const restored = hydrate(serialize(sim));
+  assert.equal(restored.oversprayAcres, sim.oversprayAcres);
+  restored.refill();
+  assert.equal(restored.oversprayAcres, sim.oversprayAcres);
+  assert.equal(restored.coverage, sim.coverage);
+  restored.reset();
+  assert.equal(restored.oversprayAcres, 0);
+  assert.equal(restored.coverage, 0);
+});
+
+void test('overspray is deducted once from earned pay and bonus, with no negative payout', () => {
+  const sim = new Simulation();
+  sim.reset();
+  for (let i = 0; i < 1444; i++) sim.covered.add(i);
+  sim.oversprayAcres = 2.5;
+  assert.equal(sim.finish(), true);
+  assert.equal(sim.result.bonus, 450);
+  assert.equal(sim.result.penalty, 2.5 * OVERSPRAY_PENALTY_PER_ACRE);
+  assert.equal(sim.result.total, 1550);
+  assert.equal(sim.career.cash, 1550);
+  assert.equal(sim.career.totalEarned, 1550);
+  assert.equal(sim.finish(), false);
+  assert.equal(sim.career.cash, 1550);
+  sim.reset();
+  for (let i = 0; i < 1444; i++) sim.covered.add(i);
+  sim.oversprayAcres = 10000;
+  sim.finish();
+  assert.equal(sim.result.penalty, 1650);
+  assert.equal(sim.result.total, 0);
+  assert.equal(sim.career.cash, 1550);
+});
+
+void test('older saved flights and completion receipts load without retroactive penalties', () => {
+  const state = serialize(new Simulation());
+  const {
+    oversprayAcres: _acres,
+    offTargetFraction: _fraction,
+    result: _result,
+    ...legacy
+  } = state;
+  const restored = hydrate({
+    ...legacy,
+    result: { pay: 1200, bonus: 450, coverage: 100 },
+  } as FlightState);
+  assert.equal(restored.oversprayAcres, 0);
+  assert.equal(restored.oversprayPenalty, 0);
+  assert.equal(restored.result.penalty, 0);
+  assert.equal(restored.result.total, 1650);
 });

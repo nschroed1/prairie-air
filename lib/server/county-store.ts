@@ -205,7 +205,7 @@ export class D1CountyStore implements CountyStore {
             finished,
             season.id,
             id,
-            sim.result.pay + sim.result.bonus,
+            sim.result.total,
             (sim.job.acres * sim.coverage) / 100,
             sim.coverage,
             sim.elapsed,

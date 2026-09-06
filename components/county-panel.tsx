@@ -14,6 +14,7 @@ import {
   Clock,
 } from 'lucide-react';
 import type { CountySnapshot, CountyJob, Standing } from '@/lib/county';
+import { OVERSPRAY_PENALTY_PER_ACRE } from '@/lib/simulation';
 const money = (n: number) => '$' + Math.round(n).toLocaleString('en-US');
 export function CountyPanel({
   county,
@@ -227,7 +228,9 @@ export function CountyPanel({
           <p className="save-note">
             60 finite jobs per season. Completed fields stay completed. One
             active claim per pilot; claims expire after two minutes without new
-            coverage. Careers carry over to the next season.
+            coverage. Off-field spray deducts{' '}
+            {money(OVERSPRAY_PENALTY_PER_ACRE)}
+            /ac from payment. Careers carry over to the next season.
           </p>
         </TabsContent>
         <TabsContent value="standings">

@@ -131,6 +131,8 @@ export type FlightState = {
   job: Contract;
   result: Simulation['result'];
   spraying: boolean;
+  oversprayAcres?: number;
+  offTargetFraction?: number;
 };
 export function serialize(sim: Simulation): FlightState {
   return {
@@ -150,11 +152,22 @@ export function serialize(sim: Simulation): FlightState {
     job: sim.job,
     result: sim.result,
     spraying: sim.spraying,
+    oversprayAcres: sim.oversprayAcres,
+    offTargetFraction: sim.offTargetFraction,
   };
 }
 export function hydrate(state: FlightState) {
   const sim = new Simulation();
   Object.assign(sim, state);
+  // Saved flights from before overspray penalties start with no deduction.
+  sim.oversprayAcres = Math.max(0, state.oversprayAcres ?? 0);
+  sim.offTargetFraction = state.offTargetFraction ?? 0;
+  sim.result = {
+    ...state.result,
+    penalty: state.result.penalty ?? 0,
+    total: state.result.total ?? state.result.pay + state.result.bonus,
+    oversprayAcres: state.result.oversprayAcres ?? 0,
+  };
   sim.covered = new Set(state.covered);
   return sim;
 }

@@ -606,6 +606,33 @@ kbd {
   font-size: 8px;
   color: #b7c6a9;
 }
+.overspray-summary {
+  margin-top: 13px;
+  padding-top: 10px;
+  border-top: 1px solid #edf6c820;
+  font-size: 10px;
+  color: #c5d4bb;
+  font-variant-numeric: tabular-nums;
+}
+.overspray-summary > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 5px;
+}
+.overspray-summary strong {
+  color: #f0f4d9;
+  white-space: nowrap;
+}
+.overspray-summary small {
+  font-size: 9px;
+  color: #b7c6a9;
+}
+.overspray-summary.has-penalty > div:first-child,
+.overspray-summary.has-penalty > div:first-child strong,
+.state-card .overspray-result {
+  color: #ffb29c;
+}
 .claim {
   margin-top: 20px;
   width: 100%;
@@ -665,6 +692,14 @@ kbd {
   background: #3b5d32d9;
   color: #e6f7b4;
   border-color: #e6f7b452;
+}
+.flight-message.spray-bad {
+  color: #ffe6d7;
+  background: #7e3024ed;
+  border-color: #ffc3a880;
+}
+.flight-message.spray-bad .live-dot {
+  background: #ffb29c;
 }
 .reticle {
   position: absolute;

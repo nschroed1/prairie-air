@@ -205,6 +205,44 @@ void test('server coverage is required, payment is once-only, and a season archi
   assert.equal(next.previousStandings[0].earnings, 1650);
   assert.equal(next.jobs[0].status, 'open');
 });
+void test('the server records off-field discharge, preserves it on refill, and ranks only net earnings', async () => {
+  const { command, service, advance, db } = setup();
+  await command('alice', 'join');
+  await command('alice', 'claim', { jobId: 100 });
+  advance(1000);
+  const sprayed = await command('alice', 'tick', {
+    steps: Array.from({ length: 20 }, () => ({
+      dt: 0.05,
+      input: { ...freshControls(), spray: true },
+    })),
+  });
+  const acres = sprayed.player!.flight.oversprayAcres!;
+  assert.ok(acres > 0, 'The spawn approach is outside the claimed field');
+  const refilled = await command('alice', 'refill');
+  assert.equal(refilled.player!.flight.oversprayAcres, acres);
+  const sim = hydrate(refilled.player!.flight);
+  // The coverage fixture is server-owned; clients only submit bounded inputs.
+  for (let i = 0; i < 1444; i++) sim.covered.add(i);
+  db.prepare('UPDATE pilots SET state=? WHERE id=?').run(
+    JSON.stringify(serialize(sim)),
+    'alice',
+  );
+  const receipt = {
+    requestId: crypto.randomUUID(),
+    revision: refilled.player!.revision,
+    action: 'finish' as const,
+    steps: [],
+  };
+  const completed = await service.command('alice', receipt);
+  const result = completed.player!.flight.result;
+  assert.ok(result.penalty > 0);
+  assert.equal(result.total, 1650 - result.penalty);
+  assert.equal(completed.player!.flight.career.cash, result.total);
+  assert.equal(completed.standings[0].earnings, result.total);
+  const retry = await service.command('alice', receipt);
+  assert.equal(retry.player!.flight.career.cash, result.total);
+  assert.equal(retry.standings[0].jobs, 1);
+});
 void test('stale revisions cannot overwrite a newer flight or buy free upgrades', async () => {
   const { command, service } = setup();
   const joined = await command('alice', 'join');

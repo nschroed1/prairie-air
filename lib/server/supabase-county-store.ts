@@ -126,7 +126,7 @@ export class SupabaseCountyStore implements CountyStore {
           finished === null
             ? null
             : {
-                earnings: sim.result.pay + sim.result.bonus,
+                earnings: sim.result.total,
                 acres: (sim.job.acres * sim.coverage) / 100,
                 elapsed: sim.elapsed,
               },

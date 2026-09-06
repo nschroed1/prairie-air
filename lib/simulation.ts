@@ -37,7 +37,22 @@ for (let z = -6; z <= 6; z++)
               : 'soybeans',
     });
   }
-export type Contract = { id: number; name: string; farmer: string; crop: Field['crop']; treatment: string; x: number; z: number; acres: number; pay: number; bonus: number; target: number; bonusTarget: number; note: string; difficulty: string };
+export type Contract = {
+  id: number;
+  name: string;
+  farmer: string;
+  crop: Field['crop'];
+  treatment: string;
+  x: number;
+  z: number;
+  acres: number;
+  pay: number;
+  bonus: number;
+  target: number;
+  bonusTarget: number;
+  note: string;
+  difficulty: string;
+};
 export const contracts: readonly Contract[] = [
   {
     id: 0,
@@ -122,6 +137,8 @@ export const freshControls = (): Controls => ({
   slower: false,
   spray: false,
 });
+export const OVERSPRAY_PENALTY_PER_ACRE = 40;
+const SQUARE_METERS_PER_ACRE = 4046.8564224;
 export class Simulation {
   phase: Phase = 'ready';
   career: Career = freshCareer();
@@ -137,9 +154,18 @@ export class Simulation {
   tank = 100;
   elapsed = 0;
   spraying = false;
+  oversprayAcres = 0;
+  offTargetFraction = 0;
   covered = new Set<number>();
   coverageVersion = 0;
-  result = { pay: 0, bonus: 0, coverage: 0 };
+  result = {
+    pay: 0,
+    bonus: 0,
+    coverage: 0,
+    penalty: 0,
+    total: 0,
+    oversprayAcres: 0,
+  };
   message = '';
   get altitude() {
     return this.y - ground(this.x, this.z);
@@ -152,6 +178,21 @@ export class Simulation {
   }
   get swath() {
     return 58 + this.career.upgrades.boom * 18;
+  }
+  get earnedBonus() {
+    return this.coverage >= this.job.bonusTarget ? this.job.bonus : 0;
+  }
+  get oversprayPenalty() {
+    return Math.min(
+      this.job.pay + this.earnedBonus,
+      Math.round(this.oversprayAcres * OVERSPRAY_PENALTY_PER_ACRE),
+    );
+  }
+  get projectedPay() {
+    return this.job.pay + this.earnedBonus - this.oversprayPenalty;
+  }
+  get overspraying() {
+    return this.spraying && this.offTargetFraction > 0;
   }
   get inField() {
     return (
@@ -180,6 +221,16 @@ export class Simulation {
     this.covered.clear();
     this.coverageVersion++;
     this.elapsed = 0;
+    this.oversprayAcres = 0;
+    this.offTargetFraction = 0;
+    this.result = {
+      pay: 0,
+      bonus: 0,
+      coverage: 0,
+      penalty: 0,
+      total: 0,
+      oversprayAcres: 0,
+    };
     this.phase = 'flying';
     this.spraying = false;
   }
@@ -192,14 +243,21 @@ export class Simulation {
     this.speed = this.throttle = 42;
     this.phase = 'flying';
     this.spraying = false;
+    this.offTargetFraction = 0;
   }
   finish() {
     if (this.phase !== 'flying' || this.coverage < this.job.target)
       return false;
-    const bonus = this.coverage >= this.job.bonusTarget ? this.job.bonus : 0;
-    this.result = { pay: this.job.pay, bonus, coverage: this.coverage };
-    this.career.cash += this.job.pay + bonus;
-    this.career.totalEarned += this.job.pay + bonus;
+    this.result = {
+      pay: this.job.pay,
+      bonus: this.earnedBonus,
+      coverage: this.coverage,
+      penalty: this.oversprayPenalty,
+      total: this.projectedPay,
+      oversprayAcres: this.oversprayAcres,
+    };
+    this.career.cash += this.result.total;
+    this.career.totalEarned += this.result.total;
     this.career.flights++;
     if (!this.career.completed.includes(this.job.id))
       this.career.completed.push(this.job.id);
@@ -217,6 +275,7 @@ export class Simulation {
     return true;
   }
   step(dt: number, input: Controls) {
+    this.offTargetFraction = 0;
     if (this.phase !== 'flying') {
       this.spraying = false;
       return;
@@ -256,21 +315,39 @@ export class Simulation {
     } else this.message = '';
     this.spraying = input.spray && this.tank > 0;
     if (!this.spraying) return;
-    this.tank = Math.max(0, this.tank - dt * 0.67);
-    if (!this.validSpray) return;
-    this.paint(this.x + wind * this.altitude * 0.16, this.z, dt);
+    const sprayDt = Math.min(dt, this.tank / 0.67);
+    this.tank = Math.max(0, this.tank - sprayDt * 0.67);
+    // Off-field discharge still counts when height, speed, or bank prevents
+    // useful treatment. Drift and the whole boom footprint affect the penalty.
+    this.paint(
+      this.x + wind * this.altitude * 0.16,
+      this.z,
+      sprayDt,
+      this.validSpray,
+    );
   }
-  paint(x: number, z: number, dt: number) {
+  paint(x: number, z: number, dt: number, applyCoverage = true) {
     const size = 12,
       half = this.swath / 2,
       depth = this.speed * dt + 9;
     let changed = false;
+    let samples = 0;
+    let outside = 0;
     for (let a = -half; a <= half; a += 4) {
       for (let b = -depth; b <= depth; b += 5) {
         const px = x + Math.cos(this.heading) * a + Math.sin(this.heading) * b;
         const pz = z + Math.sin(this.heading) * a - Math.cos(this.heading) * b;
+        samples++;
+        if (
+          Math.abs(px - this.job.x) >= 228 ||
+          Math.abs(pz - this.job.z) >= 226
+        ) {
+          outside++;
+          continue;
+        }
+        if (!applyCoverage) continue;
         const col = Math.floor((px - this.job.x + 228) / size);
-        const row = Math.floor((pz - this.job.z + 228) / size);
+        const row = Math.floor(((pz - this.job.z + 226) / 452) * 38);
         if (col < 0 || col >= 38 || row < 0 || row >= 38) continue;
         const n = row * 38 + col;
         if (!this.covered.has(n)) {
@@ -279,6 +356,12 @@ export class Simulation {
         }
       }
     }
+    this.offTargetFraction = samples ? outside / samples : 0;
+    // Integrate treated area over time, including repeated off-field passes.
+    // Counting paint samples as acres would make penalties depend on frame rate.
+    this.oversprayAcres +=
+      (this.offTargetFraction * this.swath * this.speed * dt) /
+      SQUARE_METERS_PER_ACRE;
     if (changed) this.coverageVersion++;
   }
 }

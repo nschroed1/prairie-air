@@ -2,7 +2,15 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { PGlite } from '@electric-sql/pglite';
-import { initialFlight } from '../lib/county';
+import {
+  initialFlight,
+  seasonAt,
+  seasonJobs,
+  SEASON_EPOCH,
+} from '../lib/county';
+import { Simulation } from '../lib/simulation';
+import { SupabaseCountyStore } from '../lib/server/supabase-county-store';
+import type { PilotRow, ClaimRow } from '../lib/server/county-store';
 
 async function setup() {
   const db = new PGlite();
@@ -81,6 +89,95 @@ void test('Postgres schema denies browser table access and privileged game comma
     );
     assert.equal(tables.rows.length, 3);
     assert.ok(tables.rows.every((row) => row.relrowsecurity));
+  } finally {
+    await db.close();
+  }
+});
+void test('the Supabase adapter persists the overspray receipt and net leaderboard payout', async (t) => {
+  const { db, join, command } = await setup();
+  try {
+    await join('alice');
+    assert.equal(
+      await command('alice', 0, {
+        action: 'claim',
+        selected: 100,
+        active_job: 100,
+      }),
+      true,
+    );
+    const p = (
+      await db.query<PilotRow>(
+        "SELECT * FROM public.prairie_pilots WHERE id='alice'",
+      )
+    ).rows[0];
+    const claim = (
+      await db.query<ClaimRow>(
+        "SELECT *, 'Pilot Alice' AS callsign FROM public.prairie_field_claims WHERE id=100",
+      )
+    ).rows[0];
+    const season = seasonAt(SEASON_EPOCH);
+    const selected = seasonJobs(season)[0];
+    const sim = new Simulation();
+    sim.reset(selected);
+    for (let i = 0; i < 1444; i++) sim.covered.add(i);
+    sim.oversprayAcres = 2.5;
+    sim.finish();
+    const store = new SupabaseCountyStore(
+      'https://test.supabase.co',
+      'sb_secret_test',
+    );
+    // Exercise the real adapter payload against the real Postgres transaction.
+    t.mock.method(
+      store.client,
+      'rpc',
+      async (name: string, args: { payload: unknown }) => {
+        assert.equal(name, 'prairie_commit');
+        const response = await db.query<{ ok: boolean }>(
+          'SELECT public.prairie_commit($1::jsonb) AS ok',
+          [JSON.stringify(args.payload)],
+        );
+        return { data: response.rows[0].ok, error: null };
+      },
+    );
+    assert.equal(
+      await store.commit({
+        id: 'alice',
+        command: {
+          action: 'finish',
+          revision: p.revision,
+          requestId: 'finish-overspray-test',
+          steps: [],
+        },
+        now: 2000,
+        season,
+        oldActive: 100,
+        claim,
+        p,
+        sim,
+        active: null,
+        selected,
+        finished: 100,
+        callsign: 'Pilot Alice',
+        credit: 0.15,
+      }),
+      true,
+    );
+    const receipt = (
+      await db.query<{ earnings: number }>(
+        'SELECT earnings FROM public.prairie_payouts WHERE job=100',
+      )
+    ).rows[0];
+    assert.equal(Number(receipt.earnings), 1550);
+    const saved = (
+      await db.query<{ state: string }>(
+        "SELECT state FROM public.prairie_pilots WHERE id='alice'",
+      )
+    ).rows[0];
+    const flight = JSON.parse(saved.state) as ReturnType<typeof initialFlight>;
+    assert.equal(flight.oversprayAcres, 2.5);
+    assert.equal(flight.result.penalty, 100);
+    assert.equal(flight.result.total, 1550);
+    assert.equal(flight.career.cash, 1550);
   } finally {
     await db.close();
   }

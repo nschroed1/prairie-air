@@ -40,6 +40,7 @@ import {
   loadCareer,
   contracts,
   upgradePrice,
+  OVERSPRAY_PENALTY_PER_ACRE,
   type Contract,
 } from '@/lib/simulation';
 import { registerFlightTools, registerCountyTools } from '@/lib/webmcp';
@@ -271,8 +272,9 @@ export default function Home() {
     fly = sim.phase === 'flying';
   const heading =
     ((Math.round((sim.heading * 180) / Math.PI) % 360) + 360) % 360;
-  const sprayMessage =
-    sim.tank <= 0
+  const sprayMessage = sim.overspraying
+    ? 'Overspray · release spray to stop the penalty'
+    : sim.tank <= 0
       ? 'Tank empty · press R to refill'
       : sim.altitude > 30
         ? 'Descend below 98 ft to spray'
@@ -285,7 +287,7 @@ export default function Home() {
               : sim.spraying
                 ? sim.inField
                   ? 'Good pass · applying treatment'
-                  : 'Outside your field · spray is wasted'
+                  : 'Outside your field · keep spray off'
                 : 'Ready for a clean pass';
   return (
     <main className="game-shell">
@@ -575,6 +577,26 @@ export default function Home() {
                 <strong className="bonus">+{money(sim.job.bonus)}</strong>
               </div>
             </div>
+            {active &&
+              (mode === 'practice' ||
+                county?.player?.activeJob ||
+                sim.phase === 'complete') && (
+                <div
+                  className={`overspray-summary ${sim.oversprayPenalty > 0 ? 'has-penalty' : ''}`}
+                >
+                  <div>
+                    <span>Overspray · {sim.oversprayAcres.toFixed(2)} ac</span>
+                    <strong>−{money(sim.oversprayPenalty)}</strong>
+                  </div>
+                  <div>
+                    <span>Net at completion</span>
+                    <strong>{money(sim.projectedPay)}</strong>
+                  </div>
+                  <small>
+                    {money(OVERSPRAY_PENALTY_PER_ACRE)}/ac outside your field
+                  </small>
+                </div>
+              )}
             {active && sim.coverage >= sim.job.target && fly && (
               <button className="primary claim" onClick={finish}>
                 Complete contract
@@ -602,7 +624,7 @@ export default function Home() {
       {active && (
         <>
           <div
-            className={`flight-message ${sim.spraying && sim.validSpray && sim.inField ? 'spray-good' : ''}`}
+            className={`flight-message ${mode === 'public' && !county?.player?.activeJob ? '' : sim.overspraying ? 'spray-bad' : sim.spraying && sim.validSpray && sim.inField ? 'spray-good' : ''}`}
           >
             <span className="live-dot" />
             {mode === 'public' && !county?.player?.activeJob
@@ -810,19 +832,27 @@ export default function Home() {
         <div className="state-overlay">
           <div className="state-card success">
             <Trophy size={38} />
-            <span className="eyebrow">A JOB WELL DONE</span>
+            <span className="eyebrow">CONTRACT COMPLETE</span>
             <h2>
-              {sim.result.bonus ? 'Above and beyond.' : 'The fields thank you.'}
+              {sim.result.penalty > 0
+                ? 'Mind the field edges.'
+                : sim.result.bonus
+                  ? 'Above and beyond.'
+                  : 'The fields thank you.'}
             </h2>
             <p>
               {sim.result.coverage.toFixed(1)}% covered for {sim.job.farmer}.
             </p>
-            <strong className="result-pay">
-              +{money(sim.result.pay + sim.result.bonus)}
-            </strong>
+            <strong className="result-pay">+{money(sim.result.total)}</strong>
             {sim.result.bonus > 0 && (
               <p className="bonus">
-                Includes {money(sim.result.bonus)} precision bonus
+                Precision bonus: +{money(sim.result.bonus)}
+              </p>
+            )}
+            {sim.result.penalty > 0 && (
+              <p className="overspray-result">
+                Overspray deduction: −{money(sim.result.penalty)} (
+                {sim.result.oversprayAcres.toFixed(2)} ac outside the field)
               </p>
             )}
             <button
@@ -1031,9 +1061,10 @@ export default function Home() {
                 </p>
               </div>
               <p className="save-note">
-                Refills are free in this MVP and keep your coverage. A crash
-                restarts the contract. Fly on for the bonus, then claim your
-                payment.
+                Off-field spray costs {money(OVERSPRAY_PENALTY_PER_ACRE)} per
+                acre and reduces your final payment, down to $0. Watch the full
+                boom and wind drift at field edges. Refills keep your coverage
+                and overspray deduction. Restarting a contract clears both.
               </p>
             </div>
           )}
