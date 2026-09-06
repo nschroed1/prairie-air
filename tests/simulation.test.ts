@@ -12,12 +12,23 @@ import {
 } from '../lib/simulation';
 import { hydrate, serialize, type FlightState } from '../lib/county';
 
+// Preserve full-size county regression coverage as the practice lessons evolve.
+const fullField = {
+  ...contracts[0],
+  width: undefined,
+  depth: undefined,
+  windStrength: undefined,
+  acres: 51,
+  pay: 1200,
+  bonus: 450,
+};
+
 void test('starting each contract places aircraft at safe spraying altitude by the correct crop', () => {
   const sim = new Simulation();
   for (const job of contracts) {
     sim.reset(job);
     assert.equal(sim.phase, 'flying');
-    assert.equal(sim.altitude, 19);
+    assert.ok(Math.abs(sim.altitude - 19) < 1e-9);
     assert.equal(sim.coverage, 0);
     assert.equal(
       fields.find((f) => f.x === job.x && f.z === job.z)?.crop,
@@ -27,7 +38,7 @@ void test('starting each contract places aircraft at safe spraying altitude by t
 });
 void test('parallel passes cover the field; repeat passes and off-field spraying do not inflate coverage', () => {
   const sim = new Simulation();
-  sim.reset();
+  sim.reset(fullField);
   sim.x = sim.z = 0;
   sim.y = ground(0, 0) + 19;
   sim.paint(0, 0, 0.016);
@@ -45,7 +56,7 @@ void test('parallel passes cover the field; repeat passes and off-field spraying
 void test('wrong altitude and steep banks consume spray but cannot treat the field', () => {
   const sim = new Simulation();
   const input = { ...freshControls(), spray: true };
-  sim.reset();
+  sim.reset(fullField);
   sim.x = sim.z = 0;
   sim.y = ground(0, 0) + 70;
   sim.step(0.03, input);
@@ -61,7 +72,7 @@ void test('wrong altitude and steep banks consume spray but cannot treat the fie
 });
 void test('payment requires the target and is claimed only once; precision gets its bonus', () => {
   const sim = new Simulation();
-  sim.reset();
+  sim.reset(fullField);
   assert.equal(sim.finish(), false);
   for (let i = 0; i < 1156; i++) sim.covered.add(i);
   assert.equal(sim.finish(), true);
@@ -69,7 +80,7 @@ void test('payment requires the target and is claimed only once; precision gets 
   assert.equal(sim.result.bonus, 0);
   assert.equal(sim.finish(), false);
   assert.equal(sim.career.cash, 1200);
-  sim.reset();
+  sim.reset(fullField);
   for (let i = 0; i < 1444; i++) sim.covered.add(i);
   assert.equal(sim.finish(), true);
   assert.equal(sim.result.bonus, 450);
@@ -78,7 +89,7 @@ void test('payment requires the target and is claimed only once; precision gets 
 });
 void test('upgrades enforce price and max level, and refill preserves progress', () => {
   const sim = new Simulation();
-  sim.reset();
+  sim.reset(fullField);
   assert.equal(sim.buy('tank'), false);
   sim.career.cash = 10000;
   for (let i = 0; i < 3; i++) assert.equal(sim.buy('tank'), true);
@@ -91,11 +102,11 @@ void test('upgrades enforce price and max level, and refill preserves progress',
   sim.refill();
   assert.equal(sim.coverage, before);
   assert.equal(sim.tank, 220);
-  assert.equal(sim.altitude, 19);
+  assert.ok(Math.abs(sim.altitude - 19) < 1e-9);
 });
 void test('flight turns and climbs, pauses safely, and ground impact restarts cleanly', () => {
   const sim = new Simulation();
-  sim.reset();
+  sim.reset(fullField);
   const x = sim.x,
     y = sim.y;
   for (let i = 0; i < 30; i++)
@@ -110,7 +121,7 @@ void test('flight turns and climbs, pauses safely, and ground impact restarts cl
   sim.y = ground(sim.x, sim.z) + 1;
   sim.step(0.01, freshControls());
   assert.equal(sim.phase, 'crashed');
-  sim.reset();
+  sim.reset(fullField);
   assert.equal(sim.phase, 'flying');
   assert.equal(sim.coverage, 0);
 });
@@ -126,7 +137,7 @@ void test('career saves round trip and invalid browser storage recovers safely',
 
 void test('overspray measures the part of the boom outside the actual field, including repeated discharge', () => {
   const sim = new Simulation();
-  sim.reset();
+  sim.reset(fullField);
   sim.paint(0, 0, 0.05);
   assert.equal(sim.oversprayAcres, 0);
   sim.x = 220;
@@ -149,7 +160,7 @@ void test('overspray measures the part of the boom outside the actual field, inc
   sim.paint(600, 0, 0.05);
   assert.ok(Math.abs(sim.oversprayAcres - edge - fullSwath * 2) < 1e-10);
   const end = new Simulation();
-  end.reset();
+  end.reset(fullField);
   end.heading = Math.PI / 2;
   end.paint(0, 227, 0.05);
   assert.ok(
@@ -161,7 +172,7 @@ void test('overspray measures the part of the boom outside the actual field, inc
 void test('off-field acreage scales with time and boom width rather than frame count', () => {
   const amount = (frames: number, boom = 0) => {
     const sim = new Simulation();
-    sim.reset();
+    sim.reset(fullField);
     sim.career.upgrades.boom = boom;
     for (let i = 0; i < frames; i++) sim.paint(600, 0, 1 / frames);
     return sim.oversprayAcres;
@@ -172,7 +183,7 @@ void test('off-field acreage scales with time and boom width rather than frame c
 
 void test('banked or high off-field spraying still incurs a penalty, but idle and empty aircraft do not', () => {
   const sim = new Simulation();
-  sim.reset();
+  sim.reset(fullField);
   sim.x = 600;
   sim.z = 0;
   sim.y = ground(sim.x, sim.z) + 70;
@@ -201,7 +212,7 @@ void test('banked or high off-field spraying still incurs a penalty, but idle an
 
 void test('overspray survives refill and serialization; restarting starts a fresh attempt', () => {
   const sim = new Simulation();
-  sim.reset();
+  sim.reset(fullField);
   sim.paint(600, 0, 0.05);
   sim.paint(0, 0, 0.05);
   const restored = hydrate(serialize(sim));
@@ -216,7 +227,7 @@ void test('overspray survives refill and serialization; restarting starts a fres
 
 void test('overspray is deducted once from earned pay and bonus, with no negative payout', () => {
   const sim = new Simulation();
-  sim.reset();
+  sim.reset(fullField);
   for (let i = 0; i < 1444; i++) sim.covered.add(i);
   sim.oversprayAcres = 2.5;
   assert.equal(sim.finish(), true);
@@ -227,7 +238,7 @@ void test('overspray is deducted once from earned pay and bonus, with no negativ
   assert.equal(sim.career.totalEarned, 1550);
   assert.equal(sim.finish(), false);
   assert.equal(sim.career.cash, 1550);
-  sim.reset();
+  sim.reset(fullField);
   for (let i = 0; i < 1444; i++) sim.covered.add(i);
   sim.oversprayAcres = 10000;
   sim.finish();
@@ -256,10 +267,12 @@ void test('older saved flights and completion receipts load without retroactive 
 
 void test('coverage at field edges stays on the existing saved map grid', () => {
   const sim = new Simulation();
-  sim.reset();
+  sim.reset(fullField);
   sim.paint(0, -210, 0.01);
   assert.deepEqual(
-    [...new Set([...sim.covered].map((n) => Math.floor(n / 38)))].sort(),
+    [...new Set([...sim.covered].map((n) => Math.floor(n / 38)))].sort(
+      (a, b) => a - b,
+    ),
     [1, 2],
     'The footprint matches the rows rendered by the existing world and map',
   );

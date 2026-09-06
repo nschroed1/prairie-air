@@ -3,12 +3,15 @@ import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import type { CountySnapshot, PublicPilot } from './county';
 import {
   ground,
+  fieldSize,
   riverX,
   fields,
   Simulation,
   type Field,
   type Controls,
 } from './simulation';
+
+import { nextPass, sprayFootprint, spraySafety } from './flight-guidance';
 
 function random(seed = 1701) {
   return () => {
@@ -35,6 +38,32 @@ export class World {
   plane = new T.Group();
   prop = new T.Group();
   marker = new T.Group();
+  guidesEnabled = true;
+  guidanceAvailable = true;
+  guideLine = new T.Line(
+    new T.BufferGeometry(),
+    new T.LineBasicMaterial({
+      color: '#ffffff',
+      transparent: true,
+      opacity: 0.85,
+      depthTest: false,
+    }),
+  );
+  footprintLine = new T.Line(
+    new T.BufferGeometry(),
+    new T.LineBasicMaterial({ color: '#b9ff7a', depthTest: false }),
+  );
+  footprintFill = new T.Mesh(
+    new T.BufferGeometry(),
+    new T.MeshBasicMaterial({
+      color: '#b9ff7a',
+      transparent: true,
+      opacity: 0.22,
+      depthWrite: false,
+      depthTest: false,
+      side: T.DoubleSide,
+    }),
+  );
   coverageMesh: T.InstancedMesh;
   particles: T.Points;
   particlePositions = new Float32Array(2100);
@@ -112,7 +141,29 @@ export class World {
     this.createPlane();
     this.detailPlane();
     this.batchStatic(this.plane, this.prop);
-    this.scene.add(this.plane, this.marker);
+    this.scene.add(
+      this.plane,
+      this.marker,
+      this.guideLine,
+      this.footprintLine,
+      this.footprintFill,
+    );
+    this.guideLine.geometry.setAttribute(
+      'position',
+      new T.BufferAttribute(new Float32Array(18), 3),
+    );
+    this.footprintLine.geometry.setAttribute(
+      'position',
+      new T.BufferAttribute(new Float32Array(15), 3),
+    );
+    this.footprintFill.geometry.setAttribute(
+      'position',
+      new T.BufferAttribute(new Float32Array(18), 3),
+    );
+    this.guideLine.frustumCulled =
+      this.footprintLine.frustumCulled =
+      this.footprintFill.frustumCulled =
+        false;
     this.coverageMesh = new T.InstancedMesh(
       new T.PlaneGeometry(11.8, 11.8),
       new T.MeshBasicMaterial({
@@ -1058,22 +1109,25 @@ export class World {
       }
     }
     const { x, z } = this.sim.job;
+    const { width, depth } = fieldSize(this.sim.job);
+    const hw = width / 2,
+      hd = depth / 2;
     const points: T.Vector3[] = [];
     for (let i = 0; i <= 100; i++) {
       const t = (i / 100) * 4;
       let px: number, pz: number;
       if (t < 1) {
-        px = -228 + 456 * t;
-        pz = 226;
+        px = -hw + width * t;
+        pz = hd;
       } else if (t < 2) {
-        px = 228;
-        pz = 226 - 452 * (t - 1);
+        px = hw;
+        pz = hd - depth * (t - 1);
       } else if (t < 3) {
-        px = 228 - 456 * (t - 2);
-        pz = -226;
+        px = hw - width * (t - 2);
+        pz = -hd;
       } else {
-        px = -228;
-        pz = -226 + 452 * (t - 3);
+        px = -hw;
+        pz = -hd + depth * (t - 3);
       }
       points.push(new T.Vector3(x + px, ground(x + px, z + pz) + 2, z + pz));
     }
@@ -1087,8 +1141,8 @@ export class World {
         }),
       ),
     );
-    for (const dx of [-228, 228])
-      for (const dz of [-226, 226]) {
+    for (const dx of [-hw, hw])
+      for (const dz of [-hd, hd]) {
         const h = ground(x + dx, z + dz);
         const pole = this.addMesh(
           new T.CylinderGeometry(0.28, 0.28, 12, 6),
@@ -1110,6 +1164,59 @@ export class World {
         flag.castShadow = false;
       }
     this.lastCoverage = -1;
+  }
+  updateGuides() {
+    const visible =
+      this.guidesEnabled &&
+      this.guidanceAvailable &&
+      (this.sim.phase === 'flying' || this.sim.phase === 'paused');
+    this.guideLine.visible =
+      this.footprintLine.visible =
+      this.footprintFill.visible =
+        visible;
+    if (!visible) return;
+    const pass = nextPass(this.sim);
+    const { depth } = fieldSize(this.sim.job);
+    const direction = pass.heading === 0 ? 1 : -1;
+    const start = this.sim.job.z + direction * (depth / 2 + 65);
+    const end = this.sim.job.z - (direction * depth) / 2;
+    const lineX = pass.x - this.sim.sprayDrift;
+    const route = [
+      [lineX, start],
+      [lineX, end],
+      [lineX - 9, end + direction * 18],
+      [lineX, end],
+      [lineX + 9, end + direction * 18],
+      [lineX, end],
+    ];
+    const line = this.guideLine.geometry.attributes.position;
+    route.forEach(([x, z], i) => line.setXYZ(i, x, ground(x, z) + 3.2, z));
+    line.needsUpdate = true;
+    const points = sprayFootprint(this.sim);
+    const outline = this.footprintLine.geometry.attributes.position;
+    [...points, points[0]].forEach((p, i) =>
+      outline.setXYZ(i, p.x, ground(p.x, p.z) + 3, p.z),
+    );
+    outline.needsUpdate = true;
+    const fill = this.footprintFill.geometry.attributes.position;
+    [0, 1, 2, 0, 2, 3].forEach((n, i) =>
+      fill.setXYZ(
+        i,
+        points[n].x,
+        ground(points[n].x, points[n].z) + 2.9,
+        points[n].z,
+      ),
+    );
+    fill.needsUpdate = true;
+    const safety = spraySafety(this.sim);
+    const color =
+      safety === 'outside'
+        ? '#ff8870'
+        : safety === 'edge' || !this.sim.validSpray
+          ? '#ffc75e'
+          : '#b9ff7a';
+    this.footprintLine.material.color.set(color);
+    this.footprintFill.material.color.set(color);
   }
   updatePlane() {
     this.plane.position.set(this.sim.x, this.sim.y, this.sim.z);
@@ -1184,6 +1291,7 @@ export class World {
     this.updateCropDetail();
     this.updateMarker();
     this.updateCoverage();
+    this.updateGuides();
     this.prop.rotation.z += dt * 70;
     const preview = this.sim.phase === 'ready';
     const offset =
@@ -1226,6 +1334,7 @@ export class World {
     this.frame = requestAnimationFrame(this.animate);
   };
   setCounty(county: CountySnapshot | null) {
+    this.guidanceAvailable = !county || Boolean(county.player?.activeJob);
     const live =
       county?.pilots.filter(
         (p) => p.id !== county.viewerId && p.phase === 'flying',

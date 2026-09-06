@@ -41,16 +41,40 @@ import {
   contracts,
   upgradePrice,
   OVERSPRAY_PENALTY_PER_ACRE,
+  fieldSize,
   type Contract,
 } from '@/lib/simulation';
 import { registerFlightTools, registerCountyTools } from '@/lib/webmcp';
 import type { World } from '@/lib/world';
 import { CountyClient } from '@/lib/county-client';
 import { CountyPanel } from '@/components/county-panel';
+import {
+  FlightBriefing,
+  FlightCoach,
+  FlightDebrief,
+  FieldPlot,
+} from '@/components/flight-lesson';
+import {
+  nextPass,
+  lineUpLesson,
+  spraySafety,
+  sprayFootprint,
+  loadPracticeBests,
+  isPersonalBest,
+  type PracticeBests,
+  type PracticeBest,
+} from '@/lib/flight-guidance';
 import type { CountyJob, PublicPilot, Action } from '@/lib/county';
 
 const money = (n: number) => '$' + Math.round(n).toLocaleString('en-US');
-type Panel = 'contracts' | 'hangar' | 'help' | 'county' | 'standings' | null;
+type Panel =
+  | 'briefing'
+  | 'contracts'
+  | 'hangar'
+  | 'help'
+  | 'county'
+  | 'standings'
+  | null;
 
 export default function Home() {
   'use no memo'; // The imperative flight engine supplies a fresh HUD tick at 10 Hz.
@@ -65,6 +89,12 @@ export default function Home() {
     [panel, setPanel] = useState<Panel>(null),
     [muted, setMuted] = useState(true);
   const [notice, setNotice] = useState('');
+  const [guideEnabled, setGuideEnabled] = useState(true);
+  const bests = useRef<PracticeBests>({});
+  const [bestResult, setBestResult] = useState<{
+    isBest: boolean;
+    previous?: PracticeBest;
+  }>({ isBest: false });
   const [mode, setMode] = useState<'public' | 'practice'>('public');
   const [client] = useState(
     () =>
@@ -82,6 +112,9 @@ export default function Home() {
   useEffect(() => {
     world.current?.setCounty(mode === 'public' ? county : null);
   }, [county, mode, revision]);
+  useEffect(() => {
+    if (world.current) world.current.guidesEnabled = guideEnabled;
+  }, [guideEnabled, ready]);
   const onlineAction = useCallback(
     async (action: Action) => {
       Object.assign(controls.current, freshControls());
@@ -100,6 +133,30 @@ export default function Home() {
     }
     refresh((v) => v + 1);
   }, [sim]);
+  const completePractice = useCallback(() => {
+    if (!sim.finish()) return;
+    const previous = bests.current[String(sim.job.id)];
+    const current = {
+      total: sim.result.total,
+      coverage: sim.result.coverage,
+      oversprayAcres: sim.result.oversprayAcres,
+      elapsed: sim.elapsed,
+    };
+    const isBest = isPersonalBest(current, previous);
+    setBestResult({ isBest, previous });
+    if (isBest) {
+      bests.current[String(sim.job.id)] = current;
+      try {
+        localStorage.setItem(
+          'prairie-air-practice-bests-v1',
+          JSON.stringify(bests.current),
+        );
+      } catch {
+        setNotice('Your best finish could not be saved on this device.');
+      }
+    }
+    save();
+  }, [sim, save]);
   useEffect(() => {
     let disposed = false;
     import('@/lib/world')
@@ -178,7 +235,7 @@ export default function Home() {
       }
       if (e.code === 'Enter' && sim.phase === 'flying') {
         if (mode === 'public') void onlineAction('finish');
-        else if (sim.finish()) save();
+        else completePractice();
       }
       refresh((v) => v + 1);
     };
@@ -205,22 +262,24 @@ export default function Home() {
       window.removeEventListener('blur', blur);
       document.removeEventListener('visibilitychange', visibility);
     };
-  }, [panel, sim, save, mode, client, onlineAction]);
+  }, [panel, sim, completePractice, mode, client, onlineAction]);
   useEffect(() => {
     drawMap(
       map.current,
       sim,
       mode === 'public' ? county?.pilots : undefined,
       county?.viewerId,
+      guideEnabled,
     );
-  }, [revision, sim, county, mode]);
+  }, [revision, sim, county, mode, guideEnabled]);
   const start = (job: Contract = sim.job) => {
     if (mode === 'public') {
       void onlineAction('retry');
       return;
     }
     sim.reset(job);
-    setPanel(null);
+    sim.phase = 'paused';
+    setPanel('briefing');
     Object.assign(controls.current, freshControls());
     refresh((v) => v + 1);
   };
@@ -246,7 +305,7 @@ export default function Home() {
       void onlineAction('finish');
       return;
     }
-    if (sim.finish()) save();
+    completePractice();
   };
   const joinCounty = async () => {
     setMode('public');
@@ -264,14 +323,29 @@ export default function Home() {
     setMode('practice');
     try {
       sim.career = loadCareer(localStorage.getItem('prairie-air-career-v1'));
+      bests.current = loadPracticeBests(
+        localStorage.getItem('prairie-air-practice-bests-v1'),
+      );
     } catch {}
     sim.reset(contracts[0]);
+    sim.phase = 'paused';
+    setGuideEnabled(true);
+    setPanel('briefing');
+    refresh((v) => v + 1);
+  };
+  const lineUpPractice = () => {
+    if (mode !== 'practice' || sim.job.id !== 0) return;
+    if (!lineUpLesson(sim)) return;
+    Object.assign(controls.current, freshControls());
     refresh((v) => v + 1);
   };
   const active = sim.phase !== 'ready',
     fly = sim.phase === 'flying';
   const heading =
     ((Math.round((sim.heading * 180) / Math.PI) % 360) + 360) % 360;
+  const safety = spraySafety(sim);
+  const hasAssignment =
+    mode === 'practice' || Boolean(county?.player?.activeJob);
   const sprayMessage = sim.overspraying
     ? 'Overspray · release spray to stop the penalty'
     : sim.tank <= 0
@@ -288,7 +362,11 @@ export default function Home() {
                 ? sim.inField
                   ? 'Good pass · applying treatment'
                   : 'Outside your field · keep spray off'
-                : 'Ready for a clean pass';
+                : safety === 'outside'
+                  ? 'Outside spray footprint · keep spray off'
+                  : safety === 'edge'
+                    ? 'Field edge ahead · release Space'
+                    : 'Green footprint · ready to spray';
   return (
     <main className="game-shell">
       <div ref={mount} className="world-canvas" />
@@ -372,7 +450,15 @@ export default function Home() {
             72° <span>Clear skies</span>
           </strong>
           <small>
-            <Wind size={13} /> SW 6 kt <span>·</span> 8:42 AM
+            <Wind size={13} />{' '}
+            {mode === 'practice' && active
+              ? sim.job.id === 0
+                ? 'Gentle west breeze'
+                : sim.job.id === 1
+                  ? 'Strong west wind'
+                  : 'West breeze'
+              : 'SW 6 kt'}{' '}
+            <span>·</span> 8:42 AM
           </small>
         </div>
       </div>
@@ -430,29 +516,35 @@ export default function Home() {
           <button
             className="primary launch"
             onClick={() => {
-              if (mode === 'public') void joinCounty();
-              else start();
+              if (county?.viewerId) void joinCounty();
+              else practice();
             }}
             disabled={
-              !ready ||
-              (mode === 'public' && (!county?.viewerId || client.actionPending))
+              !ready || (Boolean(county?.viewerId) && client.actionPending)
             }
           >
             {ready
-              ? mode === 'public'
+              ? county?.viewerId
                 ? 'Join public county'
-                : 'Take flight'
+                : 'Fly your first job'
               : 'Preparing your aircraft…'}
             <ArrowUpRight size={21} />
           </button>
           {mode === 'public' && county && !county.viewerId && (
             <a className="signin-link" href="/auth">
-              Sign in or create your pilot account
+              Sign in to the public county
             </a>
           )}
-          <button className="practice-link" onClick={practice}>
-            Solo practice
-          </button>
+          {county?.viewerId && (
+            <button className="practice-link" onClick={practice}>
+              Practice with the flight coach
+            </button>
+          )}
+          {!county?.viewerId && (
+            <span className="guest-flight-note">
+              No account needed · guided practice · about 3 minutes
+            </span>
+          )}
           {county?.viewerId && (
             <a href="/auth" className="signin-link">
               Manage pilot account
@@ -621,6 +713,30 @@ export default function Home() {
           </div>
         </div>
       )}
+      {active &&
+        hasAssignment &&
+        !panel &&
+        sim.phase === 'flying' &&
+        guideEnabled && (
+          <FlightCoach
+            sim={sim}
+            onLineUp={
+              mode === 'practice' && sim.job.id === 0
+                ? lineUpPractice
+                : undefined
+            }
+          />
+        )}
+      {active && hasAssignment && (
+        <button
+          className="guide-toggle"
+          aria-pressed={guideEnabled}
+          onClick={() => setGuideEnabled((v) => !v)}
+        >
+          <Crosshair size={15} />
+          Flight guide {guideEnabled ? 'on' : 'off'}
+        </button>
+      )}
       {active && (
         <>
           <div
@@ -742,7 +858,7 @@ export default function Home() {
           </button>
         </div>
       </div>
-      <aside className="minimap">
+      <aside className={`minimap ${!active ? 'map-idle' : 'map-active'}`}>
         <div>
           <span>
             <span className="live-dot" /> FIELD MAP
@@ -828,55 +944,21 @@ export default function Home() {
           </div>
         </div>
       )}
-      {sim.phase === 'complete' && (
-        <div className="state-overlay">
-          <div className="state-card success">
-            <Trophy size={38} />
-            <span className="eyebrow">CONTRACT COMPLETE</span>
-            <h2>
-              {sim.result.penalty > 0
-                ? 'Mind the field edges.'
-                : sim.result.bonus
-                  ? 'Above and beyond.'
-                  : 'The fields thank you.'}
-            </h2>
-            <p>
-              {sim.result.coverage.toFixed(1)}% covered for {sim.job.farmer}.
-            </p>
-            <strong className="result-pay">+{money(sim.result.total)}</strong>
-            {sim.result.bonus > 0 && (
-              <p className="bonus">
-                Precision bonus: +{money(sim.result.bonus)}
-              </p>
-            )}
-            {sim.result.penalty > 0 && (
-              <p className="overspray-result">
-                Overspray deduction: −{money(sim.result.penalty)} (
-                {sim.result.oversprayAcres.toFixed(2)} ac outside the field)
-              </p>
-            )}
-            <button
-              className="primary"
-              onClick={() => {
-                sim.phase = 'paused';
-                open('contracts');
-              }}
-            >
-              Find your next job
-              <ArrowUpRight size={17} />
-            </button>
-            <button
-              className="secondary"
-              onClick={() => {
-                sim.phase = 'paused';
-                open('hangar');
-              }}
-            >
-              Visit the hangar
-              <Wrench size={16} />
-            </button>
-          </div>
-        </div>
+      {sim.phase === 'complete' && !panel && (
+        <FlightDebrief
+          sim={sim}
+          practice={mode === 'practice'}
+          newBest={bestResult.isBest}
+          previousBest={bestResult.previous}
+          nextJob={mode === 'practice' ? contracts[sim.job.id + 1] : undefined}
+          onNext={() => {
+            if (mode === 'practice' && contracts[sim.job.id + 1])
+              start(contracts[sim.job.id + 1]);
+            else open('contracts');
+          }}
+          onHangar={() => open('hangar')}
+          onReplay={() => start(sim.job)}
+        />
       )}
       <Dialog
         open={panel !== null}
@@ -886,23 +968,38 @@ export default function Home() {
       >
         <DialogContent className="game-dialog">
           <DialogTitle>
-            {panel === 'county' || panel === 'standings'
-              ? 'The heartland, together.'
-              : panel === 'contracts'
-                ? 'Good work, waiting for you.'
-                : panel === 'hangar'
-                  ? 'Make this bird your own.'
-                  : 'A feel for the flying.'}
+            {panel === 'briefing'
+              ? sim.job.name
+              : panel === 'county' || panel === 'standings'
+                ? 'The heartland, together.'
+                : panel === 'contracts'
+                  ? 'Good work, waiting for you.'
+                  : panel === 'hangar'
+                    ? 'Make this bird your own.'
+                    : 'A feel for the flying.'}
           </DialogTitle>
           <DialogDescription>
-            {panel === 'county' || panel === 'standings'
-              ? 'A shared sky. A finite season. Your name on the board.'
-              : panel === 'contracts'
-                ? 'Three local farms. A whole lot of possibility.'
-                : panel === 'hangar'
-                  ? `Your crop duster · ${money(sim.career.cash)} available`
-                  : 'A few simple controls. Plenty of room to get better.'}
+            {panel === 'briefing'
+              ? `${sim.job.farmer} · ${sim.job.crop} · ${sim.job.treatment}`
+              : panel === 'county' || panel === 'standings'
+                ? 'A shared sky. A finite season. Your name on the board.'
+                : panel === 'contracts'
+                  ? 'Three local farms. A whole lot of possibility.'
+                  : panel === 'hangar'
+                    ? `Your crop duster · ${money(sim.career.cash)} available`
+                    : 'A few simple controls. Plenty of room to get better.'}
           </DialogDescription>
+          {panel === 'briefing' && (
+            <FlightBriefing
+              job={sim.job}
+              onFly={() => {
+                Object.assign(controls.current, freshControls());
+                sim.phase = 'flying';
+                setPanel(null);
+                refresh((v) => v + 1);
+              }}
+            />
+          )}
           {(panel === 'county' || panel === 'standings') &&
             (county ? (
               <CountyPanel
@@ -941,7 +1038,10 @@ export default function Home() {
             <div className="contract-list">
               {contracts.map((job, i) => (
                 <article className="contract-row" key={job.id}>
-                  <div className="contract-number">0{i + 1}</div>
+                  <div className="contract-preview">
+                    <FieldPlot job={job} />
+                    <span>0{i + 1}</span>
+                  </div>
                   <div className="contract-info">
                     <small>
                       {job.farmer}{' '}
@@ -1100,12 +1200,19 @@ function drawMap(
   sim: Simulation,
   pilots: PublicPilot[] = [],
   viewerId?: string | null,
+  guideEnabled = true,
 ) {
   const ctx = canvas?.getContext('2d');
   if (!ctx || !canvas) return;
   const w = canvas.width,
     h = canvas.height,
-    scale = 0.13,
+    scale =
+      sim.phase === 'ready'
+        ? 0.13
+        : Math.min(
+            w / (fieldSize(sim.job).width + 150),
+            h / (fieldSize(sim.job).depth + 150),
+          ),
     cx = sim.job.x,
     cz = sim.job.z;
   const px = (x: number) => (x - cx) * scale + w / 2,
@@ -1147,12 +1254,13 @@ function drawMap(
     ctx.lineTo(px(x), pz(z));
   }
   ctx.stroke();
+  const { width: fieldWidth, depth: fieldDepth } = fieldSize(sim.job);
   ctx.fillStyle = '#c5dd6540';
   ctx.fillRect(
-    px(sim.job.x - 228),
-    pz(sim.job.z - 228),
-    456 * scale,
-    456 * scale,
+    px(sim.job.x - fieldWidth / 2),
+    pz(sim.job.z - fieldDepth / 2),
+    fieldWidth * scale,
+    fieldDepth * scale,
   );
   ctx.fillStyle = '#c4ee88';
   sim.covered.forEach((n) =>
@@ -1167,12 +1275,36 @@ function drawMap(
   ctx.lineWidth = 1.5;
   ctx.strokeStyle = '#d1e795';
   ctx.strokeRect(
-    px(sim.job.x - 228),
-    pz(sim.job.z - 228),
-    456 * scale,
-    456 * scale,
+    px(sim.job.x - fieldWidth / 2),
+    pz(sim.job.z - fieldDepth / 2),
+    fieldWidth * scale,
+    fieldDepth * scale,
   );
   ctx.setLineDash([]);
+  if (guideEnabled && (sim.phase === 'flying' || sim.phase === 'paused')) {
+    const pass = nextPass(sim);
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(px(pass.x - sim.sprayDrift), pz(sim.job.z + fieldDepth / 2));
+    ctx.lineTo(px(pass.x - sim.sprayDrift), pz(sim.job.z - fieldDepth / 2));
+    ctx.stroke();
+    const footprint = sprayFootprint(sim),
+      safety = spraySafety(sim);
+    ctx.strokeStyle =
+      safety === 'outside'
+        ? '#ff8870'
+        : safety === 'edge'
+          ? '#ffc75e'
+          : '#b9ff7a';
+    ctx.beginPath();
+    footprint.forEach((point, i) => {
+      if (i === 0) ctx.moveTo(px(point.x), pz(point.z));
+      else ctx.lineTo(px(point.x), pz(point.z));
+    });
+    ctx.closePath();
+    ctx.stroke();
+  }
   const xx = Math.max(10, Math.min(w - 10, px(sim.x))),
     zz = Math.max(10, Math.min(h - 10, pz(sim.z)));
   ctx.save();

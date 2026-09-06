@@ -52,6 +52,10 @@ export type Contract = {
   bonusTarget: number;
   note: string;
   difficulty: string;
+  width?: number;
+  depth?: number;
+  windStrength?: number;
+  briefing?: string;
 };
 export const contracts: readonly Contract[] = [
   {
@@ -62,9 +66,14 @@ export const contracts: readonly Contract[] = [
     treatment: 'Fertilizer',
     x: 0,
     z: 0,
-    acres: 51,
-    pay: 1200,
-    bonus: 450,
+    acres: 14,
+    width: 192,
+    depth: 288,
+    windStrength: 0.35,
+    briefing:
+      'A small corn plot. Follow the white line, hold Space over the marked corn, then release before turning. Take your time lining up the next strip.',
+    pay: 750,
+    bonus: 250,
     target: 80,
     bonusTarget: 95,
     note: 'Our corn could use a little lift. Nice, even passes will do the trick.',
@@ -72,19 +81,24 @@ export const contracts: readonly Contract[] = [
   },
   {
     id: 1,
-    name: 'A greener tomorrow',
+    name: 'The crosswind run',
     farmer: 'Willow Creek Acres',
     crop: 'soybeans',
     treatment: 'Pesticide',
     x: -510,
     z: -510,
-    acres: 51,
+    acres: 19,
+    width: 216,
+    depth: 360,
+    windStrength: 3.5,
+    briefing:
+      'A narrower soybean plot and a stronger west wind. Aim slightly upwind: the spray footprint shows where treatment will land. Keep the whole boom inside the flags.',
     pay: 1650,
     bonus: 600,
     target: 85,
     bonusTarget: 96,
-    note: 'Keep the bugs off our beans. Mind the breeze and keep your wings level.',
-    difficulty: 'Steady hands',
+    note: 'The breeze is up. Keep your spray inside our soybean plot for a clean finish.',
+    difficulty: 'Crosswind precision',
   },
   {
     id: 2,
@@ -139,6 +153,23 @@ export const freshControls = (): Controls => ({
 });
 export const OVERSPRAY_PENALTY_PER_ACRE = 40;
 const SQUARE_METERS_PER_ACRE = 4046.8564224;
+export const fieldSize = (job: Contract) => ({
+  width: job.width ?? 456,
+  depth: job.depth ?? 452,
+});
+export const insideField = (job: Contract, x: number, z: number) => {
+  const { width, depth } = fieldSize(job);
+  return Math.abs(x - job.x) < width / 2 && Math.abs(z - job.z) < depth / 2;
+};
+// All plots share the original saved 38 × 38 grid. Small practice plots use
+// a subset, so public flights and their existing coverage remain compatible.
+export const fieldCellCount = (job: Contract) => {
+  const { width, depth } = fieldSize(job);
+  return (
+    (Math.ceil((228 + width / 2) / 12) - Math.floor((228 - width / 2) / 12)) *
+    (Math.ceil((228 + depth / 2) / 12) - Math.floor((228 - depth / 2) / 12))
+  );
+};
 export class Simulation {
   phase: Phase = 'ready';
   career: Career = freshCareer();
@@ -171,7 +202,7 @@ export class Simulation {
     return this.y - ground(this.x, this.z);
   }
   get coverage() {
-    return (this.covered.size / (38 * 38)) * 100;
+    return Math.min(100, (this.covered.size / fieldCellCount(this.job)) * 100);
   }
   get tankCapacity() {
     return 100 + this.career.upgrades.tank * 40;
@@ -195,9 +226,7 @@ export class Simulation {
     return this.spraying && this.offTargetFraction > 0;
   }
   get inField() {
-    return (
-      Math.abs(this.x - this.job.x) < 228 && Math.abs(this.z - this.job.z) < 226
-    );
+    return insideField(this.job, this.x, this.z);
   }
   get validSpray() {
     return (
@@ -207,16 +236,26 @@ export class Simulation {
       this.speed < 61
     );
   }
+  get wind() {
+    return (
+      ((Math.sin(this.elapsed * 0.8) * 0.32 + 0.65) *
+        (this.job.windStrength ?? 1)) /
+      (1 + this.career.upgrades.stability * 0.6)
+    );
+  }
+  get sprayDrift() {
+    return this.wind * this.altitude * 0.16;
+  }
   reset(job = this.job) {
     this.job = job;
-    this.x = job.x - 190;
-    this.z = job.z + 330;
+    this.x =
+      job.x - (job.width ? Math.max(0, (job.width - this.swath - 6) / 2) : 190);
+    this.z = job.z + (job.depth ? job.depth / 2 + 70 : 330);
     this.y = ground(this.x, this.z) + 19;
     this.heading = 0;
     this.roll = 0;
     this.pitch = 0;
-    this.speed = 42;
-    this.throttle = 42;
+    this.speed = this.throttle = job.width ? 34 : 42;
     this.tank = this.tankCapacity;
     this.covered.clear();
     this.coverageVersion++;
@@ -236,11 +275,15 @@ export class Simulation {
   }
   refill() {
     this.tank = this.tankCapacity;
-    this.x = this.job.x - 190;
-    this.z = this.job.z + 330;
+    this.x =
+      this.job.x -
+      (this.job.width
+        ? Math.max(0, (this.job.width - this.swath - 6) / 2)
+        : 190);
+    this.z = this.job.z + (this.job.depth ? this.job.depth / 2 + 70 : 330);
     this.y = ground(this.x, this.z) + 19;
     this.heading = this.roll = this.pitch = 0;
-    this.speed = this.throttle = 42;
+    this.speed = this.throttle = this.job.width ? 34 : 42;
     this.phase = 'flying';
     this.spraying = false;
     this.offTargetFraction = 0;
@@ -294,9 +337,7 @@ export class Simulation {
     );
     this.speed += (this.throttle - this.speed) * dt * 1.8;
     this.heading -= this.roll * dt * 0.9;
-    const wind =
-      (Math.sin(this.elapsed * 0.8) * 0.32 + 0.65) /
-      (1 + this.career.upgrades.stability * 0.6);
+    const wind = this.wind;
     this.x += (Math.sin(this.heading) * this.speed + wind) * dt;
     this.z -= Math.cos(this.heading) * this.speed * dt;
     this.y += Math.sin(this.pitch) * this.speed * dt;
@@ -338,10 +379,7 @@ export class Simulation {
         const px = x + Math.cos(this.heading) * a + Math.sin(this.heading) * b;
         const pz = z + Math.sin(this.heading) * a - Math.cos(this.heading) * b;
         samples++;
-        if (
-          Math.abs(px - this.job.x) >= 228 ||
-          Math.abs(pz - this.job.z) >= 226
-        ) {
+        if (!insideField(this.job, px, pz)) {
           outside++;
           continue;
         }

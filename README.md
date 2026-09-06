@@ -14,7 +14,7 @@ Play: https://playprairieair.com. The Cloudflare/Supabase backend is active, and
 - Seasonal standings rank earnings, then precision. Previous-season standings remain visible. Careers, aircraft upgrades, and cash carry over; seasonal scores reset. All upgrade levels compete together in this alpha.
 - Free flight remains available when contracts are finished or awaiting their next scheduled wave.
 - Supabase handles email/password accounts, email verification, and password reset. The API verifies signed access tokens, their project, audience, and role before accepting player commands. Only a hashed pilot ID and editable callsign appear publicly; account email is not exposed. The old ChatGPT-login database was empty at activation; any future legacy imports require explicit account linking.
-- Solo practice retains the original three repeatable contracts and device-local career. Practice progress never enters the public economy or rankings.
+- Solo practice starts with a guided 14-acre corn plot, followed by a 19-acre crosswind soybean contract and the full pasture contract. Practice progress and personal bests stay in this browser and never enter the public economy or rankings.
 
 ## Run locally
 
@@ -31,11 +31,21 @@ Apply the initial local migration once to an empty database. Additional migratio
 ```sh
 npx tsc --noEmit
 npx oxlint app lib db components/county-panel.tsx tests/county.test.ts
-npx tsx --test tests/auth.test.ts tests/county-client.test.ts tests/county.test.ts tests/simulation.test.ts tests/supabase-store.test.ts
+npx tsx --test tests/auth.test.ts tests/county-client.test.ts tests/county.test.ts tests/simulation.test.ts tests/flight-guidance.test.ts tests/supabase-store.test.ts
 npm run build
 ```
 
 The unmodified generated component catalog has existing lint errors under the scaffold configuration. Application-source lint is checked separately.
+
+## Guided first flights
+
+Guests can start the first job without an account. A paused briefing introduces the plot and controls before the aircraft moves. The optional flight coach and white pass line guide coverage; a ground footprint includes boom width and wind drift. Green means inside the plot, amber warns of the approaching edge or ineffective flight attitude, and red means part of the footprint is outside. The field map zooms to the assigned plot. Guidance does not alter public simulation, penalties, or payments.
+
+The starter uses four short passes with the base aircraft and a gentle breeze; guidance adjusts to wider upgraded booms. An optional starter-only line-up aid preserves coverage, tank, overspray, and earnings. The second plot has stronger physical crosswind and a narrower working area than a full county field. All public county contracts retain their previous dimensions, coverage grid, and economy.
+
+A completed flight shows its coverage map, itemized payment, farmer feedback, and a specific improvement tip. Practice pilots can immediately start the next job, choose an upgrade, or retry. Best practice finishes are saved locally, ordered by take-home pay, coverage, lower overspray, then shorter flight time. Public county careers start separately after account creation.
+
+Automated flight-step tests verify that the starter guide advances through four passes, can meet the completion requirement with negligible overspray, and funds a first upgrade. Human completion time, handling feel, visual layout on target devices, and retention still need playtesting.
 
 ## Controls
 
