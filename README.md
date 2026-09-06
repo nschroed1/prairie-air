@@ -2,7 +2,7 @@
 
 A Three.js crop-dusting game set in a shared Iowa county. Public pilots compete for a finite seasonal pool of farm contracts and appear in each other's skies and field maps.
 
-Play: https://playprairieair.com. The Cloudflare/Supabase backend is active; public signup and password-reset emails still need the Resend SMTP connection completed. Solo practice is available without an account.
+Play: https://playprairieair.com. The Cloudflare/Supabase backend is active, and Resend SMTP is configured for signup and password-reset emails. Email delivery and callback flows still need an end-to-end test. Solo practice is available without an account.
 
 ## Public county
 

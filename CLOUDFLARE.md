@@ -6,7 +6,7 @@ Live URL: https://playprairieair.com
 
 The original https://prairie-air.extremecode-767.workers.dev address remains available. The custom domain is declared in `wrangler.cloudflare.jsonc`, so future deployments preserve it.
 
-The first deployment is complete. Password authentication and shared contracts passed live API checks. Public signup/reset email delivery still requires custom SMTP; see `supabase/SETUP.md` for current status.
+The deployment is complete. Password authentication and shared contracts passed live API checks. Resend custom SMTP is enabled with a verified sending domain; signup/reset delivery and callback flows still need an end-to-end test. See `supabase/SETUP.md` for current status.
 
 ## Build and inspect
 

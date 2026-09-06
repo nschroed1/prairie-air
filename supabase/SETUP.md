@@ -19,13 +19,13 @@ Immediately before Cloudflare activation, all three live Sites/D1 tables (`pilot
 
 The old Sites deployment is still available with its separate D1 database and ChatGPT login. It has not been redirected or changed. Share the Cloudflare URL for the Supabase county. If records are later imported from the old host, use an explicit account-linking process and prevent duplicate payouts; do not match accounts by unverified email.
 
-## Remaining: public signup email
+## Email delivery
 
-The user created a Resend account and registered `playprairieair.com`. Its Cloudflare zone is active, expires September 5, 2027, and auto-renew is off. The Resend domain ID is `c443de07-d813-42a7-994d-58011270f80a`. DKIM, SPF, bounce MX, and DMARC records were imported from Resend's exact values; their public DNS responses were verified. Resend reports DNS verified and is completing domain verification.
+The user created a Resend account and registered `playprairieair.com`. Its Cloudflare zone is active, expires September 5, 2027, and auto-renew is off. The Resend domain ID is `c443de07-d813-42a7-994d-58011270f80a`. DKIM, SPF, bounce MX, and DMARC records were imported from Resend's exact values; their public DNS responses were verified. Resend reports the domain as **Verified** and ready to send.
 
-Custom SMTP remains disabled until the Resend connection is completed. The prepared OAuth consent requests Auth and Projects read/write access for `Game Org`; user approval is pending. Once authorized, select the existing Supabase project and domain, configure the sender as `Prairie Air <pilots@playprairieair.com>`, and verify the SMTP settings. Keep email confirmation enabled.
+The user authorized Resend's Supabase integration for `Game Org`. The integration is connected to the existing project and domain and created its `Supabase Integration` sending key. Custom SMTP is enabled in Supabase with host `smtp.resend.com`, port `465`, and sender `Prairie Air <pilots@playprairieair.com>`. The corrected sender address was saved and verified after reloading the Supabase dashboard. The integration manages the SMTP credential; it was not copied into the game or repository. Email/password signup remains enabled and email confirmation remains required, verified through the public Auth settings endpoint after SMTP setup.
 
-Hosting, password authentication, and gameplay storage are active, but public email registration and password-reset delivery are not ready. No signup or reset emails have been sent or tested. Once SMTP is configured, test signup, confirmation, and password recovery in the browser, including the PKCE same-browser return flow.
+Hosting, password authentication, gameplay storage, and email-provider configuration are active. No signup or reset emails have been sent or tested. Before inviting testers, test signup, confirmation, and password recovery in the browser, including the PKCE same-browser return flow, and confirm delivery in Resend's logs.
 
 ## Validation
 
