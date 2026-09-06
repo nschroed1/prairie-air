@@ -6,6 +6,7 @@
   "compatibility_date": "2026-09-05",
   "compatibility_flags": ["nodejs_compat"],
   "workers_dev": true,
+  "routes": [{ "pattern": "playprairieair.com", "custom_domain": true }],
   "preview_urls": false,
   "observability": { "enabled": true },
   "vars": {

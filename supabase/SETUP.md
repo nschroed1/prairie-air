@@ -4,13 +4,13 @@ Project: `jyclvsljxzszxjhpmsab` at `https://jyclvsljxzszxjhpmsab.supabase.co`.
 
 ## Active Cloudflare deployment
 
-- Game: https://prairie-air.extremecode-767.workers.dev
+- Game: https://playprairieair.com (the original Workers address remains available).
 - Worker: `prairie-air` in the owner's Cloudflare account.
-- Deployment version: `b7188315-00a2-4f7a-a696-92d374c0601c`.
+- Deployment version: `03ad57b0-98aa-4d4c-8b0c-339e2000d25e`.
 - `COUNTY_STORAGE=supabase` is active. The Worker has no D1 binding.
 - Both supplied keys were verified without printing them. They are stored in Cloudflare Worker secrets and ignored local `.dev.vars` (mode 0600). The server secret is absent from compiled code, browser assets, and the deployment configuration. `/api/auth/config` intentionally returns only the project URL and publishable key.
 - Email/password sign-in and email confirmation are enabled. The project uses ES256 signing keys.
-- Supabase Site URL is the Cloudflare game origin. Exactly six allowed redirects are configured: `/auth` and `/auth?view=reset` on the Cloudflare origin, the old `https://prairie-air.nschroed1.chatgpt.site` origin, and `http://localhost:3000`.
+- Supabase Site URL is `https://playprairieair.com`. Exactly eight allowed redirects are configured: `/auth` and `/auth?view=reset` on the custom domain, the original Workers origin, the old `https://prairie-air.nschroed1.chatgpt.site` origin, and `http://localhost:3000`.
 - `migrations/202609050001_prairie_county.sql` was applied using the signed-in project SQL editor. All three tables have RLS enabled; browser roles cannot access them or invoke transaction functions directly. This migration is immutable; append new migrations for changes.
 
 ## Data transition
@@ -21,9 +21,11 @@ The old Sites deployment is still available with its separate D1 database and Ch
 
 ## Remaining: public signup email
 
-Custom SMTP is still disabled. Supabase's default test sender cannot deliver signup/reset emails to the general public. Supply a sender domain and email provider, then configure Authentication → Emails → SMTP Settings with the provider's credentials. Keep email confirmation enabled.
+The user created a Resend account and registered `playprairieair.com`. Its Cloudflare zone is active, expires September 5, 2027, and auto-renew is off. The Resend domain ID is `c443de07-d813-42a7-994d-58011270f80a`. DKIM, SPF, bounce MX, and DMARC records were imported from Resend's exact values; their public DNS responses were verified. Resend reports DNS verified and is completing domain verification.
 
-Hosting, password authentication, and gameplay storage are active, but public email registration and password-reset delivery are not ready. No signup or reset emails have been sent or tested. Once SMTP is configured, test signup, confirmation, and password recovery in the browser, including the PKCE same-browser return flow. A custom game domain can be added separately, with corresponding auth redirects.
+Custom SMTP remains disabled until the Resend connection is completed. The prepared OAuth consent requests Auth and Projects read/write access for `Game Org`; user approval is pending. Once authorized, select the existing Supabase project and domain, configure the sender as `Prairie Air <pilots@playprairieair.com>`, and verify the SMTP settings. Keep email confirmation enabled.
+
+Hosting, password authentication, and gameplay storage are active, but public email registration and password-reset delivery are not ready. No signup or reset emails have been sent or tested. Once SMTP is configured, test signup, confirmation, and password recovery in the browser, including the PKCE same-browser return flow.
 
 ## Validation
 
