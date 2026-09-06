@@ -30,7 +30,7 @@ Apply the initial local migration once to an empty database. Additional migratio
 ```sh
 npx tsc --noEmit
 npx oxlint app lib db components/county-panel.tsx tests/county.test.ts
-npx tsx --test tests/auth.test.ts tests/county.test.ts tests/simulation.test.ts tests/supabase-store.test.ts
+npx tsx --test tests/auth.test.ts tests/county-client.test.ts tests/county.test.ts tests/simulation.test.ts tests/supabase-store.test.ts
 npm run build
 ```
 
@@ -59,4 +59,4 @@ Gameplay uses arcade flight dynamics, terrain impacts, instant free refills, and
 
 The Supabase schema and transactional functions live in `supabase/migrations/`. Local/legacy D1 schema lives in `db/schema.ts`, with Drizzle migrations in `drizzle/`. Do not rewrite a migration after it is published. `lib/server/county-service.ts` owns the public economy and conditional database transactions. `lib/county-client.ts` sends input samples and reconciles local flight against server state.
 
-WebMCP is feature-detected: public mode exposes `get_public_county` and `claim_county_contract`; solo practice exposes its own flight tools. Public tool registration was observed in the browser; tool calls remain untested. Browser account/game navigation has been checked. Flight playtesting, visual review, and multiplayer load testing have not been performed. Core rules, SQLite transactions, types, application-source lint, and native HTTP API flows have been checked.
+WebMCP is feature-detected: public mode exposes `get_public_county` and `claim_county_contract`; solo practice exposes its own flight tools. Public tool registration was observed in the browser; tool calls remain untested. Browser account/game navigation, sign-in, joining, claiming a field, and starting flight have been checked locally and in production. Extended flight playtesting, visual review, and multiplayer load testing have not been performed. Core rules, request scheduling, SQLite transactions, types, application-source lint, and native HTTP API flows have been checked.

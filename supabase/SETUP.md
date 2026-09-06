@@ -6,7 +6,7 @@ Project: `jyclvsljxzszxjhpmsab` at `https://jyclvsljxzszxjhpmsab.supabase.co`.
 
 - Game: https://playprairieair.com (the original Workers address remains available).
 - Worker: `prairie-air` in the owner's Cloudflare account.
-- Deployment version: `1be5c32e-058f-45e9-97ac-e77ad25ec6f0`.
+- Deployment version: `7e469288-dc09-43b2-85e2-587e1d50792f`.
 - `COUNTY_STORAGE=supabase` is active. The Worker has no D1 binding.
 - Both supplied keys were verified without printing them. They are stored in Cloudflare Worker secrets and ignored local `.dev.vars` (mode 0600). The server secret is absent from compiled code, browser assets, and the deployment configuration. `/api/auth/config` intentionally returns only the project URL and publishable key.
 - Email/password sign-in and email confirmation are enabled. The project uses ES256 signing keys.
@@ -29,10 +29,12 @@ Hosting, password authentication, gameplay storage, and email-provider configura
 
 ## Validation
 
+- Fixed contract buttons flashing disabled during background flight updates. A deliberate action now reserves the next request, waits for the in-flight response, and uses its updated revision; only deliberate actions disable controls. Parked and paused aircraft send presence heartbeats without recording flight steps. Five client regressions cover slow updates, claim priority, repeated clicks, errors/retries, cancellation, and idle heartbeats.
+- A temporary test pilot signed in through the browser on localhost and the production custom domain, joined, claimed a field, and entered flight successfully. Local release also passed. Both browser sessions were signed out, and all temporary local/Supabase pilot records, reservations, and the Auth account were removed. No test email was sent.
 - Reproduced a production Vinext client-router error that left account-to-county links stuck. Account and game links now use native navigation, matching the existing successful password-sign-in redirect. After deployment, browser checks verified `/auth` → `/` → `/auth`, with the county and Three.js scene loading and no new navigation errors. The signed-in return link uses the same native navigation; a full email callback and recovery test remains outstanding.
 - Cloudflare production build and Wrangler deployment dry run passed; deployment completed successfully.
 - Native HTTP checks returned 200 for `/`, `/auth`, `/api/auth/config`, and `/api/county`. The county returned all 60 contracts. Missing or forged authentication returns 401 for game writes.
 - Two temporary, email-confirmed QA users were created through the admin API without sending email. Both signed in with email/password, joined the same live county, and appeared in shared presence. Simultaneous claims produced one success and one 409 conflict, with a single visible owner. An incomplete contract could not earn a payout. Both users signed out and all their auth and gameplay records were deleted afterward.
 - Anonymous and authenticated clients were denied direct access to private pilot records. Only server-mediated commands can update gameplay data.
-- The existing 24 unit/integration checks cover simulation, D1 transactions, signed/tampered JWTs, and Postgres migration/functions using PGlite. PGlite serializes queries and does not replace production load testing. The live two-user test additionally exercised real concurrent Supabase transactions.
+- All 29 unit/integration checks passed, covering client request scheduling, simulation, D1 transactions, signed/tampered JWTs, and Postgres migration/functions using PGlite. PGlite serializes queries and does not replace production load testing. The live two-user test additionally exercised real concurrent Supabase transactions.
 - Local play remains available at http://localhost:3000/. Its default county storage remains local D1 unless explicitly changed; solo practice stays device-local. Browser gameplay/visual testing and email delivery remain unverified.
