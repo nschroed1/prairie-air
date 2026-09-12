@@ -83,7 +83,11 @@ declare
   v_coverage double precision := (payload->>'coverage')::double precision;
   p public.prairie_pilots%rowtype;
 begin
-  perform pg_catalog.pg_advisory_xact_lock(86420317);
+  -- Advisory lock only required when claiming fields to serialize race conditions;
+  -- regular 4Hz flight ticks rely on row-level FOR UPDATE locks on prairie_pilots.
+  if v_action='claim' then
+    perform pg_catalog.pg_advisory_xact_lock(86420317);
+  end if;
   select * into p from public.prairie_pilots where id=v_id for update;
   if not found or p.revision <> (payload->>'revision')::bigint then return false; end if;
   if p.seen_at <= v_now-15000 and (select count(*) from public.prairie_pilots where seen_at > v_now-15000) >= 32 then return false; end if;

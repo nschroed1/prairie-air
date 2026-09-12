@@ -133,6 +133,7 @@ export default function Home() {
   const manualControls = useRef(freshControls());
   const [reducedMotion, setReducedMotion] = useState(false);
   const reducedMotionRef = useRef(false);
+  const invertPitchRef = useRef(false);
   const briefingTitle = useRef<HTMLHeadingElement>(null);
   const [revision, refresh] = useState(0),
     [ready, setReady] = useState(false),
@@ -171,6 +172,10 @@ export default function Home() {
     reducedMotionRef.current = reducedMotion;
     if (world.current) world.current.reducedMotion = reducedMotion;
   }, [reducedMotion, ready]);
+  useEffect(() => {
+    invertPitchRef.current = invertPitch;
+    if (world.current) world.current.invertPitch = invertPitch;
+  }, [invertPitch, ready]);
   const toggleMapZoom = useCallback(() => {
     setMapZoom((prev) => {
       const next =
@@ -460,6 +465,7 @@ export default function Home() {
         try {
           world.current = new World(mount.current, sim, controls.current);
           world.current.reducedMotion = reducedMotionRef.current;
+          world.current.invertPitch = invertPitchRef.current;
           world.current.rivalCallsign = rivalCallsignRef.current;
           world.current.rivalPilotId = rivalPilotIdRef.current;
           world.current.onRemoteProximity = (dist, speed, pan) => {
@@ -481,7 +487,7 @@ export default function Home() {
                 }
 
                 if (Math.abs(stickY) > deadzone) {
-                  if (invertPitch) {
+                  if (invertPitchRef.current) {
                     if (stickY < -deadzone) controls.current.down = true;
                     else if (stickY > deadzone) controls.current.up = true;
                   } else {
@@ -552,7 +558,7 @@ export default function Home() {
       clearInterval(timer);
       world.current?.dispose();
     };
-  }, [sim, client, invertPitch, mode, onlineAction, save]);
+  }, [sim, client, mode, onlineAction, save]);
   useEffect(() => {
     if (!ready) return;
     if (mode === 'public')

@@ -152,6 +152,7 @@ export class World {
   currentBoundary = '';
   cameraMode = 0;
   reducedMotion = false;
+  invertPitch = false;
   private lastCameraPlane = new T.Vector3();
   resizeObserver: ResizeObserver;
   onFrame: (() => void) | null = null;
@@ -1771,6 +1772,21 @@ export class World {
     const nowSec = this.time;
 
     for (const remote of this.otherPilots.values()) {
+      if (remote.target.phase === 'flying' && remote.target.speed > 0) {
+        // Dead reckoning: extrapolate position along velocity vector between 4 Hz snapshot packets
+        const rVx =
+          Math.sin(remote.target.heading) *
+          Math.cos(remote.target.pitch) *
+          remote.target.speed;
+        const rVy = Math.sin(remote.target.pitch) * remote.target.speed;
+        const rVz =
+          -Math.cos(remote.target.heading) *
+          Math.cos(remote.target.pitch) *
+          remote.target.speed;
+        remote.targetPos.x += rVx * dt;
+        remote.targetPos.y += rVy * dt;
+        remote.targetPos.z += rVz * dt;
+      }
       remote.mesh.position.lerp(remote.targetPos, 1 - Math.exp(-dt * 8));
       remote.mesh.quaternion.slerp(remote.targetQuat, 1 - Math.exp(-dt * 9));
       const remoteProp = remote.mesh.getObjectByName('propeller');
@@ -2133,11 +2149,34 @@ export class World {
     geometries.forEach((g) => g.dispose());
     const textures = new Set<T.Texture>();
     materials.forEach((m) => {
-      const mm = m as T.MeshStandardMaterial;
-      if (mm.map) textures.add(mm.map);
+      const mm = m as any;
+      if (mm.map && typeof mm.map.dispose === 'function') textures.add(mm.map);
+      if (mm.normalMap && typeof mm.normalMap.dispose === 'function')
+        textures.add(mm.normalMap);
+      if (mm.roughnessMap && typeof mm.roughnessMap.dispose === 'function')
+        textures.add(mm.roughnessMap);
+      if (mm.metalnessMap && typeof mm.metalnessMap.dispose === 'function')
+        textures.add(mm.metalnessMap);
+      if (mm.alphaMap && typeof mm.alphaMap.dispose === 'function')
+        textures.add(mm.alphaMap);
+      if (mm.bumpMap && typeof mm.bumpMap.dispose === 'function')
+        textures.add(mm.bumpMap);
+      if (
+        mm.displacementMap &&
+        typeof mm.displacementMap.dispose === 'function'
+      )
+        textures.add(mm.displacementMap);
+      if (mm.aoMap && typeof mm.aoMap.dispose === 'function')
+        textures.add(mm.aoMap);
+      if (mm.emissiveMap && typeof mm.emissiveMap.dispose === 'function')
+        textures.add(mm.emissiveMap);
+      if (mm.envMap && typeof mm.envMap.dispose === 'function')
+        textures.add(mm.envMap);
       m.dispose();
     });
     textures.forEach((texture) => texture.dispose());
+    this.scene.environment = null;
+    this.scene.background = null;
     this.environmentTarget?.dispose();
     this.sunRays?.dispose();
     this.skyLife?.dispose();
