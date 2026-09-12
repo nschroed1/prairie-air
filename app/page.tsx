@@ -9,6 +9,7 @@ import {
   Plane,
   ArrowDown,
   Sun,
+  Moon,
   Cloud,
   CloudRain,
   Haze,
@@ -191,6 +192,16 @@ export default function Home() {
       try {
         localStorage.setItem('prairie-air-map-zoom', next);
       } catch {}
+      return next;
+    });
+  }, []);
+  const [nightMode, setNightMode] = useState(false);
+  const nightModeRef = useRef(false);
+  const toggleNightMode = useCallback(() => {
+    setNightMode((curr) => {
+      const next = !curr;
+      nightModeRef.current = next;
+      world.current?.setNightMode(next);
       return next;
     });
   }, []);
@@ -476,6 +487,7 @@ export default function Home() {
           world.current.invertPitch = invertPitchRef.current;
           world.current.rivalCallsign = rivalCallsignRef.current;
           world.current.rivalPilotId = rivalPilotIdRef.current;
+          world.current.setNightMode(nightModeRef.current, true);
           world.current.onRemoteProximity = (dist, speed, pan) => {
             soundRef.current.updateRemoteProximity(dist, speed, pan);
           };
@@ -638,6 +650,9 @@ export default function Home() {
       if (e.code === 'KeyM') {
         toggleMapZoom();
       }
+      if (e.code === 'KeyN') {
+        toggleNightMode();
+      }
       if (e.code === 'Enter' && sim.phase === 'flying') {
         if (mode === 'public') void onlineAction('finish');
         else completePractice();
@@ -678,6 +693,7 @@ export default function Home() {
     save,
     invertPitch,
     toggleMapZoom,
+    toggleNightMode,
   ]);
   useEffect(() => {
     drawMap(
@@ -1529,6 +1545,13 @@ export default function Home() {
           <span>
             <kbd>SPACE</kbd> {sim.isSkywriting ? 'Smoke' : 'Spray'}
           </span>
+          <button
+            onClick={toggleNightMode}
+            title={nightMode ? 'Switch to Day Flight (N)' : 'Switch to Night Flight (N)'}
+            aria-label={nightMode ? 'Switch to Day Flight' : 'Switch to Night Flight'}
+          >
+            {nightMode ? <Sun size={17} /> : <Moon size={17} />}
+          </button>
           <button onClick={() => open('help')} title="Flight controls">
             <HelpCircle size={17} />
           </button>
@@ -2258,6 +2281,7 @@ export default function Home() {
                   ],
                   ['SHIFT / CTRL', 'Faster / slower'],
                   ['C', 'Change camera'],
+                  ['N', 'Toggle day / night flight mode'],
                   ['P / ESC', 'Pause'],
                   ['R', 'Refill & return to field'],
                   ['ENTER', 'Claim completed contract'],

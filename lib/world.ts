@@ -28,6 +28,14 @@ import { CloudSystem } from './fx/cloud-systems';
 import { SkyLifeSystem } from './fx/sky-life';
 import { TreeSystem } from './fx/tree-systems';
 import {
+  NightSkySystem,
+  NIGHT_FOG_COLOR,
+  NIGHT_HEMI_SKY,
+  NIGHT_HEMI_GROUND,
+} from './fx/night-sky';
+import { FarmsteadLightsSystem } from './fx/farmstead-lights';
+import { RoadTrafficSystem } from './fx/road-traffic';
+import {
   ground,
   insideField,
   riverX,
@@ -206,6 +214,18 @@ export class World {
   collectiblesLayout = '';
   collectibleMeshes: { mesh: T.Group; id: number }[] = [];
   windsockCone: T.Group | null = null;
+  hemiLight!: T.HemisphereLight;
+  nightSky!: NightSkySystem;
+  farmsteadLights!: FarmsteadLightsSystem;
+  roadTraffic!: RoadTrafficSystem;
+  nightMode = false;
+  nightFactor = 0;
+  nightSkyUniform = { value: 0 };
+  tailStrobeLight: T.PointLight | null = null;
+  landingLight: T.SpotLight | null = null;
+  landingBeamMesh: T.Mesh | null = null;
+  landingBeamMat: T.MeshBasicMaterial | null = null;
+  aircraftNavLights: { port: T.PointLight; stbd: T.PointLight } | null = null;
   private skyRevealWasActive = false;
   constructor(
     public host: HTMLElement,
@@ -228,7 +248,8 @@ export class World {
       'Three-dimensional flight over Iowa farmland',
     );
     this.scene.fog = new T.FogExp2('#bdd6e0', 0.00008);
-    this.scene.add(new T.HemisphereLight('#b9dbff', '#47572b', 1.25));
+    this.hemiLight = new T.HemisphereLight('#b9dbff', '#47572b', 1.25);
+    this.scene.add(this.hemiLight);
     this.sun = new T.DirectionalLight('#ffe3a8', 3.15);
     this.sun.position.copy(SUN_OFFSET);
     this.sun.castShadow = true;
@@ -243,6 +264,7 @@ export class World {
     this.sun.shadow.bias = -0.0006;
     this.scene.add(this.sun, this.sun.target);
     this.createSky();
+    this.nightSky = new NightSkySystem(this.scene);
     this.createEnvironment();
     this.sunRays = new SunRays(this.scene, this.cloudGroup, this.sun);
     this.skyLife = new SkyLifeSystem(this.scene, this.sun);
@@ -250,6 +272,8 @@ export class World {
     this.createFarms();
     this.batchStatic(this.scene);
     this.ruralLife = new RuralLife(this.scene);
+    this.farmsteadLights = new FarmsteadLightsSystem(this.scene);
+    this.roadTraffic = new RoadTrafficSystem(this.scene);
     const rainGeometry = new T.BufferGeometry();
     rainGeometry.setAttribute(
       'position',
@@ -269,6 +293,7 @@ export class World {
     this.createPlane();
     this.detailPlane();
     this.batchStatic(this.plane, this.prop);
+    this.attachAircraftNightLighting();
     this.scene.add(
       this.plane,
       this.marker,
@@ -469,12 +494,14 @@ export class World {
       uniforms: {
         sunDirection: { value: SUN_OFFSET.clone().normalize() },
         weatherCover: this.weatherCover,
+        nightFactor: this.nightSkyUniform,
       },
       vertexShader: `varying vec3 vDirection;
         void main(){vDirection=position;gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0);}`,
       fragmentShader: `varying vec3 vDirection;
         uniform vec3 sunDirection;
         uniform float weatherCover;
+        uniform float nightFactor;
         float hash(vec2 p){return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453);}
         float noise(vec2 p){vec2 i=floor(p),f=fract(p);f=f*f*(3.0-2.0*f);
           return mix(mix(hash(i),hash(i+vec2(1.,0.)),f.x),mix(hash(i+vec2(0.,1.)),hash(i+vec2(1.,1.)),f.x),f.y);}
@@ -493,6 +520,8 @@ export class World {
           vec3 graySky=mix(vec3(.55,.62,.64),vec3(.30,.38,.44),pow(height,.55));
           graySky+=noise(wisps*.7)*.075;
           color=mix(color,graySky,weatherCover*.94);
+          vec3 nightSky=mix(vec3(0.04, 0.07, 0.15), vec3(0.012, 0.02, 0.05), pow(height, 0.55));
+          color=mix(color, nightSky, nightFactor);
           gl_FragColor=vec4(color,1.0);
           #include <tonemapping_fragment>
           #include <colorspace_fragment>
@@ -1268,6 +1297,45 @@ export class World {
     );
     spinner.rotation.x = -Math.PI / 2;
   }
+  attachAircraftNightLighting() {
+    const portLight = new T.PointLight('#ff3333', 0, 16, 1.8);
+    portLight.position.set(-9.8, -0.16, -0.9);
+    this.plane.add(portLight);
+
+    const stbdLight = new T.PointLight('#33ff55', 0, 16, 1.8);
+    stbdLight.position.set(9.8, -0.16, -0.9);
+    this.plane.add(stbdLight);
+
+    this.aircraftNavLights = { port: portLight, stbd: stbdLight };
+
+    this.tailStrobeLight = new T.PointLight('#ffffff', 0, 26, 1.5);
+    this.tailStrobeLight.position.set(0, 2.2, 4.2);
+    this.plane.add(this.tailStrobeLight);
+
+    this.landingLight = new T.SpotLight('#fff4d6', 0, 140, Math.PI / 7, 0.45, 1.2);
+    this.landingLight.position.set(0, -0.4, -4.5);
+    const landingTarget = new T.Object3D();
+    landingTarget.position.set(0, -2.5, -45);
+    this.plane.add(landingTarget);
+    this.landingLight.target = landingTarget;
+    this.plane.add(this.landingLight);
+
+    const beamGeom = new T.ConeGeometry(7.5, 42, 16, 1, true);
+    beamGeom.translate(0, -21, 0);
+    beamGeom.rotateX(-Math.PI / 2);
+    this.landingBeamMat = new T.MeshBasicMaterial({
+      color: '#fff6db',
+      transparent: true,
+      opacity: 0,
+      depthWrite: false,
+      side: T.DoubleSide,
+      blending: T.AdditiveBlending,
+    });
+    this.landingBeamMesh = new T.Mesh(beamGeom, this.landingBeamMat);
+    this.landingBeamMesh.position.set(0, -0.3, -4.5);
+    this.landingBeamMesh.rotation.x = -0.06;
+    this.plane.add(this.landingBeamMesh);
+  }
   updateMarker() {
     this.marker.visible = !this.sim.isSkywriting;
     if (this.sim.isSkywriting) return;
@@ -1681,29 +1749,46 @@ export class World {
     const blend = 1 - Math.exp(-dt * 0.6);
     this.weatherCover.value +=
       (forecast.cloud - this.weatherCover.value) * blend;
-    this.sun.intensity += (forecast.sunlight - this.sun.intensity) * blend;
+
+    const targetNight = this.nightMode ? 1.0 : 0.0;
+    const nightBlend = 1 - Math.exp(-dt * 2.5);
+    this.nightFactor += (targetNight - this.nightFactor) * nightBlend;
+    this.nightSkyUniform.value = this.nightFactor;
+
+    const targetSunIntensity = forecast.sunlight * (1 - this.nightFactor * 0.96);
+    this.sun.intensity += (targetSunIntensity - this.sun.intensity) * blend;
     this.sun.color.lerp(
       this.weatherColor.set(forecast.cloud > 0.7 ? '#dce8ee' : '#ffe3a8'),
       blend,
     );
+
+    if (this.hemiLight) {
+      const targetHemiIntensity = 1.25 - this.nightFactor * 1.03;
+      this.hemiLight.intensity += (targetHemiIntensity - this.hemiLight.intensity) * blend;
+      const targetSky = new T.Color('#b9dbff').lerp(new T.Color(NIGHT_HEMI_SKY), this.nightFactor);
+      const targetGround = new T.Color('#47572b').lerp(new T.Color(NIGHT_HEMI_GROUND), this.nightFactor);
+      this.hemiLight.color.lerp(targetSky, blend);
+      this.hemiLight.groundColor.lerp(targetGround, blend);
+    }
+
     const fog = this.scene.fog as T.FogExp2;
-    fog.density += (forecast.fog - fog.density) * blend;
-    fog.color.lerp(
-      this.weatherColor.set(
-        forecast.kind === 'haze'
-          ? '#d6d2b2'
-          : forecast.cloud > 0.7
-            ? '#abbfc5'
-            : '#bdd6e0',
-      ),
-      blend,
+    const targetFogDensity = Math.max(forecast.fog, 0.00012 * this.nightFactor);
+    fog.density += (targetFogDensity - fog.density) * blend;
+    const dayFogColor = this.weatherColor.set(
+      forecast.kind === 'haze'
+        ? '#d6d2b2'
+        : forecast.cloud > 0.7
+          ? '#abbfc5'
+          : '#bdd6e0',
     );
+    const targetFogColor = dayFogColor.lerp(new T.Color(NIGHT_FOG_COLOR), this.nightFactor);
+    fog.color.lerp(targetFogColor, blend);
     this.cloudSystem?.updateWeather(forecast, dt, this.time);
     this.cloudMaterial?.color.lerp(
-      this.weatherColor.set(forecast.cloud > 0.7 ? '#a6b5bb' : '#f5f1df'),
+      this.weatherColor.set(forecast.cloud > 0.7 ? '#a6b5bb' : '#f5f1df').lerp(new T.Color('#101824'), this.nightFactor * 0.85),
       blend,
     );
-    this.scene.environmentIntensity = 0.38 - this.weatherCover.value * 0.16;
+    this.scene.environmentIntensity = (0.38 - this.weatherCover.value * 0.16) * (1 - this.nightFactor * 0.78);
     this.rainLevel += (forecast.rain - this.rainLevel) * blend;
     this.rain.visible = this.rainLevel > 0.01;
     if (!this.rain.visible) return;
@@ -1738,6 +1823,8 @@ export class World {
     this.updateCropDetail();
     this.treeSystem?.update(dt, this.time);
     this.ruralLife.update(this.time, this.sim.x, this.sim.z, this.sim.altitude);
+    this.farmsteadLights?.update(dt, this.time, this.nightFactor);
+    this.roadTraffic?.update(dt, this.sim.x, this.sim.z, this.nightFactor);
     this.hazards.update(this.sim, this.guidanceAvailable);
     this.stuntProps?.animateScenery(dt);
     if (this.windsockCone) {
@@ -1837,6 +1924,22 @@ export class World {
     }
     this.updateWeather(dt);
     this.sky?.position.copy(this.camera.position);
+    this.nightSky?.update(dt, this.time, this.camera.position, this.nightFactor);
+    if (this.tailStrobeLight) {
+      const strobePhase = (this.time * 1.25) % 1.0;
+      const isStrobe = strobePhase < 0.07 || (strobePhase > 0.14 && strobePhase < 0.21);
+      this.tailStrobeLight.intensity = (isStrobe ? 3.5 : 0) * this.nightFactor;
+    }
+    if (this.landingLight) {
+      this.landingLight.intensity = this.nightFactor * 4.2;
+    }
+    if (this.landingBeamMat) {
+      this.landingBeamMat.opacity = this.nightFactor * 0.16;
+    }
+    if (this.aircraftNavLights) {
+      this.aircraftNavLights.port.intensity = this.nightFactor * 1.2;
+      this.aircraftNavLights.stbd.intensity = this.nightFactor * 1.2;
+    }
     this.plane.visible = this.cameraMode !== 1;
     this.sun.position.copy(this.plane.position).add(SUN_OFFSET);
     this.sun.target.position.copy(this.plane.position);
@@ -2237,7 +2340,23 @@ export class World {
   triggerCameraImpulse(strength: number = 0.6): void {
     this.cameraImpulse = Math.min(1.2, this.cameraImpulse + strength);
   }
+  setNightMode(enabled: boolean, immediate = false): void {
+    this.nightMode = enabled;
+    if (immediate) {
+      this.nightFactor = enabled ? 1.0 : 0.0;
+      this.nightSkyUniform.value = this.nightFactor;
+      this.updateWeather(0.016);
+    }
+  }
+  toggleNightMode(): boolean {
+    this.setNightMode(!this.nightMode);
+    return this.nightMode;
+  }
   dispose() {
+    this.nightSky?.dispose();
+    this.farmsteadLights?.dispose();
+    this.roadTraffic?.dispose();
+    this.landingBeamMat?.dispose();
     this.skywriting?.dispose();
     this.rallyWorld?.dispose();
     this.rivalCoverageMesh?.geometry.dispose();
