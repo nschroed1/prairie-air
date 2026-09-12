@@ -149,6 +149,7 @@ export default function Home() {
   const [mapZoom, setMapZoom] = useState<'field' | 'sector' | 'county'>(
     'field',
   );
+  const [trackUp, setTrackUp] = useState(false);
 
   useEffect(() => {
     try {
@@ -668,8 +669,19 @@ export default function Home() {
       mapZoom,
       race?.rival?.callsign,
       race?.rival?.pilot,
+      trackUp,
     );
-  }, [revision, sim, county, mode, guideEnabled, mapZoom, race?.rival?.callsign, race?.rival?.pilot]);
+  }, [
+    revision,
+    sim,
+    county,
+    mode,
+    guideEnabled,
+    mapZoom,
+    race?.rival?.callsign,
+    race?.rival?.pilot,
+    trackUp,
+  ]);
   const start = (job: Contract = sim.job) => {
     if (mode === 'public') {
       void onlineAction('retry');
@@ -1363,6 +1375,49 @@ export default function Home() {
                 ? sim.warning.text
                 : sim.message || sprayMessage}
           </div>
+          {/* Agricultural GPS Lightbar (CDI) */}
+          {!sim.isSkywriting && sim.phase === 'flying' && (() => {
+            const isLocked = world.current?.arcadeFx?.isSwathLocked() ?? false;
+            const offset = world.current?.arcadeFx?.getSwathOffset() ?? Infinity;
+            const signed = world.current?.arcadeFx?.getSignedSwathOffset() ?? 0;
+            const hasFix = Number.isFinite(offset) && offset < 50;
+            if (!hasFix) return null;
+            const pips = [-4, -3, -2, -1, 0, 1, 2, 3, 4];
+            return (
+              <div
+                className={`cdi-lightbar ${isLocked ? 'locked' : ''}`}
+                role="status"
+                aria-label={`GPS Lightbar: ${isLocked ? 'Locked on swath' : `${offset.toFixed(1)}m ${signed > 0 ? 'right' : 'left'}`}`}
+              >
+                <span className={`cdi-arrow cdi-arrow-left ${signed > 0.8 ? 'active' : ''}`}>◀</span>
+                <div className="cdi-pips">
+                  {pips.map((p) => {
+                    const isCenter = p === 0;
+                    let active = false;
+                    if (isCenter) {
+                      active = isLocked;
+                    } else if (p < 0) {
+                      const thresh = p === -1 ? 1.5 : p === -2 ? 3.0 : p === -3 ? 5.5 : 9.0;
+                      active = signed >= thresh;
+                    } else {
+                      const thresh = p === 1 ? -1.5 : p === 2 ? -3.0 : p === 3 ? -5.5 : -9.0;
+                      active = signed <= thresh;
+                    }
+                    return (
+                      <span
+                        key={p}
+                        className={`cdi-pip ${isCenter ? 'pip-center' : ''} ${active ? 'active' : ''}`}
+                      />
+                    );
+                  })}
+                </div>
+                <span className={`cdi-arrow cdi-arrow-right ${signed < -0.8 ? 'active' : ''}`}>▶</span>
+                <span className="cdi-label">
+                  {isLocked ? 'LOCKED' : `${offset.toFixed(1)}m ${signed > 0 ? 'R' : 'L'}`}
+                </span>
+              </div>
+            );
+          })()}
           <div
             className={`reticle ${
               world.current?.arcadeFx?.isSwathLocked()
@@ -1628,7 +1683,14 @@ export default function Home() {
                 : 'County'}{' '}
             (M)
           </button>
-          <b>N ↑</b>
+          <button
+            type="button"
+            className="map-zoom-btn"
+            onClick={() => setTrackUp((t) => !t)}
+            title="Toggle map orientation: North-Up vs Track-Up"
+          >
+            {trackUp ? 'TRK ↑' : 'N ↑'}
+          </button>
         </div>
         <canvas
           ref={map}
@@ -1655,18 +1717,38 @@ export default function Home() {
       </aside>
       {active && (
         <div className="touch-controls">
-          {(['left', 'up', 'down', 'right'] as const).map((key, i) => (
+          {(
+            [
+              { key: 'rudderLeft', label: '◂', title: 'Rudder Left (Z)' },
+              { key: 'left', label: '←', title: 'Bank Left (A)' },
+              {
+                key: 'up',
+                label: '↑',
+                title: invertPitch ? 'Climb (S)' : 'Pitch Up (W)',
+              },
+              {
+                key: 'down',
+                label: '↓',
+                title: invertPitch ? 'Dive (W)' : 'Pitch Down (S)',
+              },
+              { key: 'right', label: '→', title: 'Bank Right (D)' },
+              { key: 'rudderRight', label: '▸', title: 'Rudder Right (X)' },
+              { key: 'faster', label: '+', title: 'Throttle Up (E)' },
+              { key: 'slower', label: '−', title: 'Throttle Down (C)' },
+            ] as const
+          ).map((btn) => (
             <button
-              key={key}
-              aria-label={key}
+              key={btn.key}
+              aria-label={btn.title}
+              title={btn.title}
               onPointerDown={(e) => {
                 e.currentTarget.setPointerCapture(e.pointerId);
-                manualControls.current[key] = true;
+                manualControls.current[btn.key] = true;
               }}
-              onPointerUp={() => (manualControls.current[key] = false)}
-              onPointerCancel={() => (manualControls.current[key] = false)}
+              onPointerUp={() => (manualControls.current[btn.key] = false)}
+              onPointerCancel={() => (manualControls.current[btn.key] = false)}
             >
-              {['←', '↑', '↓', '→'][i]}
+              {btn.label}
             </button>
           ))}
         </div>
@@ -2186,6 +2268,7 @@ function drawMap(
   mapZoom: 'field' | 'sector' | 'county' = 'field',
   rivalCallsign?: string | null,
   rivalPilotId?: string | null,
+  trackUp = false,
 ) {
   const ctx = canvas?.getContext('2d');
   if (!ctx || !canvas) return;
@@ -2213,6 +2296,15 @@ function drawMap(
     pz = (z: number) => (z - cz) * scale + h / 2;
   ctx.fillStyle = '#354e37';
   ctx.fillRect(0, 0, w, h);
+
+  const shouldRotate =
+    trackUp && (sim.phase === 'flying' || sim.phase === 'paused');
+  if (shouldRotate) {
+    ctx.save();
+    ctx.translate(w / 2, h / 2);
+    ctx.rotate(-sim.heading);
+    ctx.translate(-w / 2, -h / 2);
+  }
   const polygonPath = (job: {
     x: number;
     z: number;
@@ -2542,5 +2634,8 @@ function drawMap(
       ctx.fillText(distText, textX, textZ);
       ctx.restore();
     }
+  }
+  if (shouldRotate) {
+    ctx.restore();
   }
 }

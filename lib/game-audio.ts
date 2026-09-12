@@ -272,17 +272,19 @@ export class AudioCueTracker {
   }
 }
 
-export type AudioMix = { music: number; effects: number };
+export type AudioMix = { music: number; effects: number; radio?: boolean };
 export const DEFAULT_AUDIO_MIX: AudioMix = { music: 0.35, effects: 0.6 };
 export function readAudioMix(raw: string | null): AudioMix {
   try {
     const value = JSON.parse(raw ?? '{}');
     const volume = (v: unknown, fallback: number) =>
       typeof v === 'number' && Number.isFinite(v) ? clamp(v, 0, 1) : fallback;
-    return {
+    const mix: AudioMix = {
       music: volume(value?.music, 0.35),
       effects: volume(value?.effects, 0.6),
     };
+    if (typeof value?.radio === 'boolean') mix.radio = value.radio;
+    return mix;
   } catch {
     return { ...DEFAULT_AUDIO_MIX };
   }
@@ -520,10 +522,22 @@ export class GameAudio {
       param.setTargetAtTime(value, ctx.currentTime, time);
     ramp(this.master.gain, on ? 0.85 : 0, hidden ? 0.01 : 0.08);
     ramp(this.effects.gain, mix.effects);
-    ramp(this.music.gain, on && menu ? mix.music * 0.65 : 0, 0.45);
+    const inFlightMusic = mix.radio !== false;
+    const musicGain = on
+      ? menu
+        ? mix.music * 0.65
+        : inFlightMusic
+          ? mix.music * 0.28
+          : 0
+      : 0;
+    ramp(this.music.gain, musicGain, 0.45);
     const flying = frame.phase === 'flying';
     const idle = frame.phase === 'paused' && !menu;
-    const rpm = clamp((frame.throttle - 29) / 47, 0, 1);
+    const throttleRatio = clamp((frame.throttle - 29) / 47, 0, 1);
+    const speedRatio = clamp((frame.speed - 28) / 48, 0, 1.2);
+    const rpm = flying
+      ? clamp(throttleRatio * 0.62 + speedRatio * 0.38, 0, 1.2)
+      : throttleRatio;
     ramp(this.prop.osc.frequency, 42 + rpm * 39);
     ramp(this.motor.osc.frequency, 86 + rpm * 82);
     ramp(this.propFilter.frequency, 250 + rpm * 470);

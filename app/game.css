@@ -1013,8 +1013,8 @@ kbd {
 .hud-refill-btn {
   display: inline-block;
   margin-top: 4px;
-  padding: 2px 7px;
-  font-size: 8px;
+  padding: 3px 8px;
+  font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.6px;
   text-transform: uppercase;
@@ -1989,15 +1989,17 @@ kbd {
 @media (pointer: coarse) {
   .touch-controls {
     display: flex;
+    flex-wrap: wrap;
+    max-width: 205px;
     position: absolute;
     bottom: 92px;
     left: 20px;
-    gap: 7px;
+    gap: 6px;
     z-index: 6;
   }
   .touch-controls button {
-    width: 43px;
-    height: 43px;
+    width: 42px;
+    height: 42px;
     display: grid;
     place-items: center;
     background: #1b3a2fc9;
@@ -2005,7 +2007,7 @@ kbd {
     color: #eaf2cc;
     border-radius: 6px;
     touch-action: none;
-    font-size: 18px;
+    font-size: 16px;
   }
   .instruments .spray-button {
     display: flex;

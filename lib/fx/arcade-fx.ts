@@ -145,6 +145,7 @@ export class ArcadeFX {
   private _swathLocked = false;
   private _swathLockPulse = 0;
   private _swathOffset = Infinity;
+  private _signedSwathOffset = 0;
   private reticleMesh?: T.Mesh;
   private reticleMaterial?: T.MeshBasicMaterial;
 
@@ -394,20 +395,26 @@ export class ArcadeFX {
   private updateSwathLock(dt: number, sim: Simulation): void {
     // Swath Alignment calculation
     let offset = Infinity;
+    let signedOffset = 0;
     if (sim.job) {
       try {
         const pass = nextPass(sim);
         if (pass && typeof pass.x === 'number') {
           offset = Math.abs(sim.x - pass.x);
+          const rawDx = sim.x - pass.x;
+          const headingNorth = Math.cos(sim.heading) >= 0;
+          signedOffset = headingNorth ? rawDx : -rawDx;
         }
       } catch {
         // Safe fallback
       }
     } else if (sim.arcade && typeof sim.arcade.swathLocked === 'boolean') {
       offset = sim.arcade.swathLocked ? 0 : 10;
+      signedOffset = 0;
     }
 
     this._swathOffset = offset;
+    this._signedSwathOffset = signedOffset;
 
     // Check +-1.5m alignment tolerance
     const withinTolerance = offset <= SWATH_LOCK_TOLERANCE_METERS;
@@ -601,6 +608,10 @@ export class ArcadeFX {
 
   getSwathOffset(): number {
     return this._swathOffset;
+  }
+
+  getSignedSwathOffset(): number {
+    return this._signedSwathOffset;
   }
 
   getBadges(): readonly FloatingBadge[] {

@@ -131,14 +131,14 @@
   gap: 22px;
 }
 .flight-active .instruments small {
-  font-size: 10px;
+  font-size: 11px;
   letter-spacing: 0.07em;
 }
 .flight-active .instruments strong {
   font-size: 25px;
 }
 .flight-active .altitude-hint {
-  font-size: 9px;
+  font-size: 11px;
   letter-spacing: 0;
 }
 @media (max-height: 800px) and (min-width: 901px) {
@@ -275,7 +275,7 @@
     border-radius: 8px;
   }
   .flight-active .coach-heading {
-    font-size: 10px;
+    font-size: 11px;
     margin-bottom: 6px;
   }
   .flight-active .flight-coach > strong {
@@ -307,12 +307,12 @@
   }
   .flight-active .minimap > div {
     padding: 8px;
-    font-size: 9px;
+    font-size: 11px;
     letter-spacing: 0.04em;
   }
   .flight-active .minimap footer {
     padding: 7px 8px;
-    font-size: 9px;
+    font-size: 11px;
   }
   .flight-active .flight-message {
     grid-area: 4 / 1 / 5 / -1;
@@ -340,7 +340,7 @@
     font-size: 23px;
   }
   .flight-active .instruments small {
-    font-size: 9px;
+    font-size: 11px;
   }
   .flight-active .instruments .altitude {
     padding: 0 14px;
@@ -352,7 +352,7 @@
     gap: 10px;
   }
   .flight-active .controls-hint > span {
-    font-size: 10px;
+    font-size: 11px;
   }
   .flight-active .controls-hint > span:nth-child(2) {
     display: none;
@@ -441,7 +441,7 @@
 }
 
 .streak-label {
-  font-size: 8px;
+  font-size: 11px;
   letter-spacing: 1.2px;
   font-weight: 600;
   color: #94a3b8;
@@ -468,7 +468,7 @@
 }
 
 .meter-segment {
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 700;
   padding: 1px 5px;
   border-radius: 8px;
@@ -549,7 +549,7 @@
   gap: 5px;
   padding: 3px 8px;
   border-radius: 4px;
-  font-size: 8px;
+  font-size: 11px;
   font-weight: 700;
   letter-spacing: 1.1px;
   text-transform: uppercase;
@@ -743,4 +743,100 @@
 }
 .reduced-motion .swath-pulse {
   animation: none;
+}
+
+/* ==========================================================================
+   Agricultural GPS Lightbar (CDI) Styles
+   ========================================================================== */
+.cdi-lightbar {
+  position: absolute;
+  top: 17%;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 14px;
+  background: rgba(15, 23, 42, 0.78);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 20px;
+  backdrop-filter: blur(10px);
+  z-index: 12;
+  pointer-events: none;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.cdi-lightbar.locked {
+  border-color: rgba(74, 222, 128, 0.5);
+  box-shadow: 0 0 16px rgba(74, 222, 128, 0.3);
+}
+
+.cdi-pips {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.cdi-arrow {
+  font-size: 11px;
+  font-weight: 700;
+  color: rgba(255, 255, 255, 0.25);
+  transition: color 0.15s ease, text-shadow 0.15s ease;
+}
+
+.cdi-arrow.active {
+  color: #38bdf8;
+  text-shadow: 0 0 8px rgba(56, 189, 248, 0.85);
+}
+
+.cdi-pip {
+  width: 7px;
+  height: 11px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.16);
+  transition: background-color 0.12s ease, box-shadow 0.12s ease;
+}
+
+.cdi-pip.pip-center {
+  width: 9px;
+  height: 14px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.22);
+}
+
+.cdi-pip.active {
+  background: #facc15;
+  box-shadow: 0 0 8px rgba(250, 204, 21, 0.7);
+}
+
+.cdi-pip.pip-center.active {
+  background: #4ade80;
+  box-shadow: 0 0 12px rgba(74, 222, 128, 0.9);
+}
+
+.cdi-label {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.6px;
+  color: #e2e8f0;
+  min-width: 50px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+@media (max-width: 768px) {
+  .cdi-lightbar {
+    top: 13%;
+    padding: 4px 10px;
+    gap: 6px;
+  }
+  .cdi-pip {
+    width: 5px;
+    height: 9px;
+  }
+  .cdi-pip.pip-center {
+    width: 7px;
+    height: 12px;
+  }
 }

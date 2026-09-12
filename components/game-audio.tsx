@@ -158,6 +158,18 @@ export function useGameAudio(
     } catch {}
     window.dispatchEvent(new Event(STORAGE));
   }, []);
+  const toggleRadio = useCallback(() => {
+    const next = {
+      ...current.current.mix,
+      radio: current.current.mix.radio === false,
+    };
+    current.current.mix = next;
+    sessionMix = JSON.stringify(next);
+    try {
+      localStorage.setItem(STORAGE, sessionMix);
+    } catch {}
+    window.dispatchEvent(new Event(STORAGE));
+  }, []);
   const cue = useCallback((name: AudioCue) => {
     engine.current?.play(name);
   }, []);
@@ -174,6 +186,7 @@ export function useGameAudio(
     musicState,
     toggle,
     volume,
+    toggleRadio,
     cue,
     updateRemoteProximity,
     hasMusic: Boolean(SOUNDTRACK.src),
@@ -268,9 +281,33 @@ export function SoundControls({ sound }: { sound: AudioControls }) {
               }
             />
           </label>
+          {sound.hasMusic && (
+            <label
+              htmlFor={`${id}-flight-radio`}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8,
+                marginTop: 6,
+                fontSize: 12,
+                cursor: 'pointer',
+              }}
+            >
+              <input
+                id={`${id}-flight-radio`}
+                type="checkbox"
+                checked={sound.mix.radio !== false}
+                onChange={sound.toggleRadio}
+              />
+              <span>Keep radio playing during flight</span>
+            </label>
+          )}
           <small>
-            {sound.hasMusic ? 'Music fades out in flight. ' : ''}Audio rests
-            when this tab is hidden.
+            {sound.hasMusic
+              ? sound.mix.radio !== false
+                ? 'Radio continues softly in flight. '
+                : 'Music fades out in flight. '
+              : ''}Audio rests when this tab is hidden.
           </small>
         </div>
       </details>
