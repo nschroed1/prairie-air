@@ -111,6 +111,12 @@ import {
   SKYWRITING_PRACTICE_ID,
 } from '@/lib/skywriting';
 import { SkywritingPractice } from '@/lib/skywriting-practice';
+import { rallyContract } from '@/lib/rally';
+import { dustOffContract, DustOffAiPilot } from '@/lib/dust-off';
+import { tandemContract, TandemAiPartner } from '@/lib/tandem';
+import { DustOffHud } from '@/components/dust-off-hud';
+import { RallyHud } from '@/components/rally-hud';
+import { TandemHud } from '@/components/tandem-hud';
 
 const money = (n: number) => '$' + Math.round(n).toLocaleString('en-US');
 type Panel =
@@ -129,6 +135,8 @@ export default function Home() {
     world = useRef<World | null>(null);
   const [sim] = useState(() => new Simulation());
   const skyPractice = useRef(new SkywritingPractice());
+  const aiRival = useRef<DustOffAiPilot | null>(null);
+  const aiPartner = useRef<TandemAiPartner | null>(null);
   const controls = useRef(freshControls());
   const manualControls = useRef(freshControls());
   const [reducedMotion, setReducedMotion] = useState(false);
@@ -539,6 +547,12 @@ export default function Home() {
                 prevGamepadButtons.current[3] = Boolean(gp.buttons[3]?.pressed);
               }
             }
+            if (sim.isDustOff && aiRival.current && sim.phase === 'flying') {
+              aiRival.current.update(dt, sim);
+            }
+            if (sim.isTandem && aiPartner.current && sim.phase === 'flying') {
+              aiPartner.current.update(dt, sim);
+            }
             client.record(dt, controls.current);
           };
           setReady(true);
@@ -813,6 +827,48 @@ export default function Home() {
     setLocalChallenge(false);
     setMode('practice');
     setGuideEnabled(true);
+    setPanel('briefing');
+    Object.assign(controls.current, freshControls());
+    Object.assign(manualControls.current, freshControls());
+    refresh((v) => v + 1);
+  };
+  const startRally = () => {
+    client.disconnect();
+    sim.reset(rallyContract({ ...contracts[0], id: 9901 }));
+    sim.phase = 'paused';
+    setLocalStorm(false);
+    setLocalChallenge(false);
+    setMode('practice');
+    setPanel('briefing');
+    Object.assign(controls.current, freshControls());
+    Object.assign(manualControls.current, freshControls());
+    refresh((v) => v + 1);
+  };
+  const startDustOff = () => {
+    client.disconnect();
+    const base = contracts[1] || contracts[0];
+    const job = dustOffContract({ ...base, id: 9902 });
+    aiRival.current = new DustOffAiPilot(job);
+    sim.reset(job);
+    sim.phase = 'paused';
+    setLocalStorm(false);
+    setLocalChallenge(false);
+    setMode('practice');
+    setPanel('briefing');
+    Object.assign(controls.current, freshControls());
+    Object.assign(manualControls.current, freshControls());
+    refresh((v) => v + 1);
+  };
+  const startTandem = () => {
+    client.disconnect();
+    const base = contracts[2] || contracts[0];
+    const job = tandemContract({ ...base, id: 9903 });
+    aiPartner.current = new TandemAiPartner(job);
+    sim.reset(job);
+    sim.phase = 'paused';
+    setLocalStorm(false);
+    setLocalChallenge(false);
+    setMode('practice');
     setPanel('briefing');
     Object.assign(controls.current, freshControls());
     Object.assign(manualControls.current, freshControls());
@@ -1455,6 +1511,9 @@ export default function Home() {
               </div>
             ))}
           </div>
+          <DustOffHud sim={sim} />
+          <RallyHud sim={sim} />
+          <TandemHud sim={sim} />
         </>
       )}
       <div className="bottom-hud">
@@ -1956,6 +2015,9 @@ export default function Home() {
                 initialTab={panel === 'standings' ? 'standings' : 'fields'}
                 claim={(job) => void claim(job)}
                 practiceSkywriting={() => practiceSkywriting()}
+                startRally={startRally}
+                startDustOff={startDustOff}
+                startTandem={startTandem}
                 rename={(name) => {
                   void client.action('rename', { callsign: name });
                 }}

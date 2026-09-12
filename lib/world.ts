@@ -1,6 +1,7 @@
 import { farmRotation } from './landmark-data';
 import { HazardWorld } from './hazard-world';
 import { SkywritingWorld } from './skywriting-world';
+import { RallyWorld } from './rally-world';
 import { skyAudienceView } from './skywriting';
 import * as T from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
@@ -132,7 +133,9 @@ export class World {
     }),
   );
   coverageMesh: T.Mesh<T.BufferGeometry, T.MeshBasicMaterial>;
+  rivalCoverageMesh: T.Mesh<T.BufferGeometry, T.MeshBasicMaterial>;
   coverageLineMesh: T.LineSegments<T.BufferGeometry, T.LineBasicMaterial>;
+  rallyWorld: RallyWorld;
   coverageTiles = new Map<number, number[]>();
   coverageLineTiles = new Map<number, number[]>();
   particles: T.Points;
@@ -338,6 +341,30 @@ export class World {
     this.coverageLineMesh.geometry.setDrawRange(0, 0);
     this.coverageLineMesh.frustumCulled = false;
     this.scene.add(this.coverageLineMesh);
+
+    const rivalCoverageGeometry = new T.BufferGeometry();
+    rivalCoverageGeometry.setAttribute(
+      'position',
+      new T.BufferAttribute(new Float32Array(1444 * 6 * 3), 3).setUsage(
+        T.DynamicDrawUsage,
+      ),
+    );
+    this.rivalCoverageMesh = new T.Mesh(
+      rivalCoverageGeometry,
+      new T.MeshBasicMaterial({
+        color: '#f59e0b', // Amber gold for rival's turf swaths
+        transparent: true,
+        opacity: 0.35,
+        depthWrite: false,
+        side: T.DoubleSide,
+      }),
+    );
+    this.rivalCoverageMesh.geometry.setDrawRange(0, 0);
+    this.rivalCoverageMesh.frustumCulled = false;
+    this.scene.add(this.rivalCoverageMesh);
+
+    this.rallyWorld = new RallyWorld();
+    this.scene.add(this.rallyWorld.group);
     const pg = new T.BufferGeometry();
     pg.setAttribute(
       'position',
@@ -1551,7 +1578,9 @@ export class World {
   }
   updateCoverage() {
     this.coverageMesh.visible = this.coverageLineMesh.visible =
-      !this.sim.isSkywriting;
+      !this.sim.isSkywriting && !this.sim.isRally;
+    this.rivalCoverageMesh.visible =
+      !this.sim.isSkywriting && !this.sim.isRally && (this.sim.isDustOff || this.sim.isTandem);
     if (this.lastCoverage === this.sim.coverageVersion) return;
     this.lastCoverage = this.sim.coverageVersion;
     let i = 0;
@@ -1574,6 +1603,22 @@ export class World {
     positions.needsUpdate = true;
     this.coverageLineMesh.geometry.setDrawRange(0, li / 3);
     linePositions.needsUpdate = true;
+
+    let ri = 0;
+    const rPositions = this.rivalCoverageMesh.geometry.attributes.position;
+    const secondSet =
+      this.sim.rivalCovered.size > 0
+        ? this.sim.rivalCovered
+        : this.sim.partnerCovered;
+    secondSet.forEach((n) => {
+      const tile = this.coverageTiles.get(n);
+      if (tile) {
+        (rPositions.array as Float32Array).set(tile, ri);
+        ri += tile.length;
+      }
+    });
+    this.rivalCoverageMesh.geometry.setDrawRange(0, ri / 3);
+    rPositions.needsUpdate = true;
   }
   updateParticles(dt: number) {
     const wind = this.sim.windVector;
@@ -1811,6 +1856,7 @@ export class World {
       this.renderer.domElement.height /
         (2 * Math.tan((this.camera.fov * Math.PI) / 360)),
     );
+    this.rallyWorld?.update(this.sim.rallyState, this.time);
     this.sunRays?.update(
       dt,
       this.time,
@@ -2193,6 +2239,9 @@ export class World {
   }
   dispose() {
     this.skywriting?.dispose();
+    this.rallyWorld?.dispose();
+    this.rivalCoverageMesh?.geometry.dispose();
+    this.rivalCoverageMesh?.material.dispose();
     this.disposed = true;
     cancelAnimationFrame(this.frame);
     this.resizeObserver.disconnect();

@@ -32,38 +32,19 @@ import {
   type FieldPoint,
   type NoSprayZone,
 } from './field-geometry';
-import { fieldCellCount, fieldCells } from './field-geometry';
+import {
+  fieldCellCount,
+  fieldCells,
+} from './field-geometry';
+import {
+  freshRallyState,
+  stepRally,
+  type RallyState,
+} from './rally';
 export { fieldSize, insideField, fieldCellCount } from './field-geometry';
 
-export const clamp = (v: number, min: number, max: number) =>
-  Math.max(min, Math.min(max, v));
-export const legacyGround = (x: number, z: number) =>
-  7 +
-  Math.sin(x * 0.0017) * 8 +
-  Math.cos(z * 0.0014) * 7 +
-  Math.sin((x + z) * 0.003) * 3;
-export const ground = (x: number, z: number) => {
-  const base = legacyGround(x, z);
-  const t = clamp((Math.hypot(x, z) - 430) / 900, 0, 1);
-  const trainingBlend = t * t * (3 - 2 * t);
-  const riverDistance = Math.abs(
-    x - (980 + Math.sin(z * 0.0017) * 260 + Math.sin(z * 0.0033) * 65),
-  );
-  const valley = 1 - Math.exp(-Math.pow(riverDistance / 420, 2));
-  const rolls =
-    24 +
-    18 * Math.sin(x * 0.0021 + z * 0.0009) +
-    15 * Math.cos(z * 0.0026 - x * 0.0007);
-  const ridge =
-    100 *
-    Math.exp(-Math.pow((x + 1600) / 1400, 2) - Math.pow((z - 1400) / 2100, 2));
-  const eastHills =
-    76 *
-    Math.exp(-Math.pow((x - 2600) / 1100, 2) - Math.pow((z + 1700) / 1600, 2));
-  return base + trainingBlend * valley * (rolls + ridge + eastHills);
-};
-export const riverX = (z: number) =>
-  980 + Math.sin(z * 0.0017) * 260 + Math.sin(z * 0.0033) * 65;
+import { clamp, legacyGround, ground, riverX } from './terrain-math';
+export { clamp, legacyGround, ground, riverX };
 export type Field = {
   id: number;
   x: number;
@@ -103,7 +84,7 @@ for (let z = -6; z <= 6; z++)
     });
   }
 export type Contract = {
-  kind?: 'spray' | 'skywriting';
+  kind?: 'spray' | 'skywriting' | 'dust_off' | 'tandem' | 'rally' | 'sky_duet';
   skywriting?: SkywritingPlan;
   id: number;
   name: string;
@@ -373,6 +354,13 @@ export class Simulation {
   oversprayAcres = 0;
   offTargetFraction = 0;
   covered = new Set<number>();
+  rivalCovered = new Set<number>();
+  partnerCovered = new Set<number>();
+  matchMode: 'solo' | 'dust_off' | 'tandem' | 'rally' | 'sky_duet' = 'solo';
+  rallyState: RallyState | null = null;
+  partnerDistance = 0;
+  inFormation = false;
+  formationSeconds = 0;
   coverageVersion = 0;
   result = {
     pay: 0,
@@ -392,17 +380,42 @@ export class Simulation {
   get altitude() {
     return this.y - ground(this.x, this.z);
   }
+  get isRally() {
+    return this.job.kind === 'rally';
+  }
+  get isDustOff() {
+    return this.matchMode === 'dust_off' || this.job.kind === 'dust_off';
+  }
+  get isTandem() {
+    return this.matchMode === 'tandem' || this.job.kind === 'tandem';
+  }
   get coverage() {
     if (this.isSkywriting) return skyCoverage(this.skywriting);
+    if (this.isRally) {
+      return this.rallyState
+        ? Math.min(100, (this.rallyState.gateIndex / 10) * 100)
+        : 0;
+    }
+    if (this.isTandem) {
+      const total = Math.max(1, fieldCellCount(this.job));
+      const combined = new Set([...this.covered, ...this.partnerCovered]);
+      return Math.min(100, (combined.size / total) * 100);
+    }
     return Math.min(100, (this.covered.size / fieldCellCount(this.job)) * 100);
   }
   get isSkywriting() {
     return isSkywriting(this.job);
   }
   get completionReady() {
-    return this.isSkywriting
-      ? skyReady(this.job, this.skywriting)
-      : this.coverage >= this.job.target;
+    if (this.isSkywriting) return skyReady(this.job, this.skywriting);
+    if (this.isRally) return Boolean(this.rallyState?.completed);
+    if (this.isDustOff) {
+      const total = Math.max(1, fieldCellCount(this.job));
+      const myCov = (this.covered.size / total) * 100;
+      const rivalCov = (this.rivalCovered.size / total) * 100;
+      return myCov >= 50 || myCov + rivalCov >= 90;
+    }
+    return this.coverage >= this.job.target;
   }
   get tankCapacity() {
     return 100 + this.career.upgrades.tank * 40;
@@ -655,6 +668,24 @@ export class Simulation {
     this.lineUp();
     this.tank = this.tankCapacity;
     this.covered.clear();
+    this.rivalCovered.clear();
+    this.partnerCovered.clear();
+    this.inFormation = false;
+    this.formationSeconds = 0;
+    this.partnerDistance = 0;
+    if (job.kind === 'rally') {
+      this.rallyState = freshRallyState();
+      this.matchMode = 'rally';
+    } else if (job.kind === 'dust_off') {
+      this.rallyState = null;
+      this.matchMode = 'dust_off';
+    } else if (job.kind === 'tandem') {
+      this.rallyState = null;
+      this.matchMode = 'tandem';
+    } else {
+      this.rallyState = null;
+      this.matchMode = 'solo';
+    }
     this.coverageVersion++;
     this.elapsed = 0;
     this.birdHits = 0;
@@ -715,16 +746,70 @@ export class Simulation {
   finish() {
     if (this.phase !== 'flying' || !this.completionReady) return false;
     this.service();
-    const stunt = this.result.stuntBonus ?? 0;
-    const clean = this.cleanBonus;
+    if (this.isRally && this.rallyState) {
+      const parBonus =
+        this.rallyState.medal === 'gold'
+          ? 600
+          : this.rallyState.medal === 'silver'
+            ? 350
+            : this.rallyState.medal === 'bronze'
+              ? 150
+              : 0;
+      const stunt = this.bankedStuntBonus;
+      const gross = Math.max(0, this.job.pay + parBonus + stunt);
+      const maintenance = Math.min(gross, this.career.maintenanceDebt ?? 0);
+      const repairs = Math.min(gross - maintenance, this.career.repairDebt ?? 0);
+      this.career.maintenanceDebt = Math.max(
+        0,
+        (this.career.maintenanceDebt ?? 0) - maintenance,
+      );
+      this.career.repairDebt = Math.max(
+        0,
+        (this.career.repairDebt ?? 0) - repairs,
+      );
+      this.result = {
+        pay: this.job.pay,
+        bonus: parBonus,
+        coverage: 100,
+        penalty: 0,
+        total: gross - maintenance - repairs,
+        maintenance,
+        repairs,
+        debt: this.serviceDue,
+        oversprayAcres: 0,
+        stuntBonus: stunt,
+        cleanBonus: 0,
+        speedBonus: 0,
+      };
+      this.career.cash += this.result.total;
+      this.career.totalEarned += this.result.total;
+      this.career.flights++;
+      if (!this.career.completed.includes(this.job.id))
+        this.career.completed.push(this.job.id);
+      this.phase = 'complete';
+      this.spraying = false;
+      return true;
+    }
+    const wonDustOff = this.isDustOff
+      ? this.covered.size >= this.rivalCovered.size
+      : true;
+    const dustOffBonus = this.isDustOff
+      ? (wonDustOff ? this.job.bonus : 0)
+      : this.earnedBonus;
+    const tandemBonus = this.isTandem
+      ? Math.round(this.formationSeconds * 15)
+      : 0;
+    const stunt = (this.result.stuntBonus ?? 0) + tandemBonus;
+    const clean = this.isDustOff ? 0 : this.cleanBonus;
     const speed = this.speedBonus;
     const gross = Math.max(
       0,
       this.job.pay +
-        this.earnedBonus +
+        dustOffBonus +
         clean +
         speed +
-        this.pendingSkillBonus -
+        this.pendingSkillBonus +
+        tandemBonus -
         this.oversprayPenalty,
     );
     const maintenance = Math.min(gross, this.career.maintenanceDebt ?? 0);
@@ -739,7 +824,7 @@ export class Simulation {
     );
     this.result = {
       pay: this.job.pay,
-      bonus: this.earnedBonus,
+      bonus: dustOffBonus,
       coverage: this.coverage,
       penalty: this.oversprayPenalty,
       total: gross - maintenance - repairs,
@@ -812,7 +897,10 @@ export class Simulation {
         smooth;
     }
     this.throttle = clamp(
-      this.throttle + (Number(input.faster) - Number(input.slower)) * dt * 16,
+      this.throttle +
+        (Number(input.faster ?? false) - Number(input.slower ?? false)) *
+          dt *
+          16,
       29,
       76,
     );
@@ -889,6 +977,29 @@ export class Simulation {
       this.message = 'County boundary · turning you toward home';
     } else this.message = '';
     this.spraying = input.spray && this.tank > 0;
+    if (this.isRally) {
+      if (this.rallyState) {
+        const { gatePassed, stuntEarned } = stepRally(
+          this.rallyState,
+          this,
+          this.heading,
+          this.roll,
+          this.speed,
+          dt,
+          this.elapsed,
+        );
+        if (gatePassed) {
+          this.lastStuntCue = `Passed: ${gatePassed.name}`;
+        }
+        if (stuntEarned) {
+          this.bankedStuntBonus += stuntEarned.seconds * 100;
+          this.lastStuntCue = `${stuntEarned.name} (-${stuntEarned.seconds.toFixed(1)}s)`;
+        }
+      }
+      this.newCellsAdded = 0;
+      this.lastArcadeEvents = [];
+      return;
+    }
     if (this.isSkywriting) {
       const smokeDt = this.spraying ? Math.min(dt, this.tank) : 0;
       this.tank = Math.max(0, this.tank - smokeDt);
@@ -1162,6 +1273,7 @@ export class Simulation {
         if (col < 0 || col >= 38 || row < 0 || row >= 38) continue;
         const n = row * 38 + col;
         if (cells && !cells.has(n)) continue;
+        if (this.isDustOff && this.rivalCovered.has(n)) continue;
         if (!this.covered.has(n)) {
           this.covered.add(n);
           changed = true;
@@ -1180,6 +1292,7 @@ export class Simulation {
         row >= 0 &&
         row < 38 &&
         (!cells || cells.has(n)) &&
+        !(this.isDustOff && this.rivalCovered.has(n)) &&
         !this.covered.has(n)
       ) {
         this.covered.add(n);

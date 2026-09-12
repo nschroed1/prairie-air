@@ -40,6 +40,9 @@ export function CountyPanel({
   freeFlight,
   release,
   practiceSkywriting,
+  startRally,
+  startDustOff,
+  startTandem,
   initialTab = 'fields',
   pending,
   rivalId,
@@ -51,6 +54,9 @@ export function CountyPanel({
   freeFlight: () => void;
   release: () => void;
   practiceSkywriting?: () => void;
+  startRally?: () => void;
+  startDustOff?: () => void;
+  startTandem?: () => void;
   initialTab?: string;
   pending: boolean;
   rivalId: string | null;
@@ -164,6 +170,21 @@ export function CountyPanel({
             disabled={pending}
           >
             Practice skywriting
+          </button>
+        )}
+        {startRally && (
+          <button className="secondary" onClick={startRally} disabled={pending}>
+            Barnstormer rally
+          </button>
+        )}
+        {startDustOff && (
+          <button className="secondary" onClick={startDustOff} disabled={pending}>
+            Dust-off 1v1
+          </button>
+        )}
+        {startTandem && (
+          <button className="secondary" onClick={startTandem} disabled={pending}>
+            Tandem co-op
           </button>
         )}
         <button className="secondary" onClick={freeFlight} disabled={pending}>
