@@ -1,7 +1,16 @@
 import type { Weather } from './weather';
+import { polygonArea } from './field-geometry';
+import {
+  freshSkywriting,
+  skywritingContract,
+  type SkywritingState,
+  type SkySmoke,
+} from './skywriting';
 import {
   fields,
   Simulation,
+  ground,
+  legacyGround,
   contracts,
   type Contract,
   type Controls,
@@ -84,7 +93,7 @@ export function seasonJobs(season: Season): CountyJob[] {
             ? 'Weed control'
             : 'Pesticide'
           : 'Cover-crop seed';
-    return {
+    const job: CountyJob = {
       id: season.id * 1000 + i + 100,
       season: season.id,
       wave,
@@ -100,7 +109,10 @@ export function seasonJobs(season: Season): CountyJob[] {
       treatment,
       x: f.x,
       z: f.z,
-      acres: 51,
+      width: f.width,
+      depth: f.depth,
+      boundary: f.boundary,
+      acres: Math.round(polygonArea(f.boundary) / 4046.8564224),
       pay: 1200 + wave * 350 + (i % 4) * 100,
       bonus: 450 + wave * 150,
       target: 80 + wave * 5,
@@ -113,10 +125,41 @@ export function seasonJobs(season: Season): CountyJob[] {
       coverage: 0,
       pilot: null,
     };
+    // The live first season keeps its original 60 contracts. Later seasons
+    // reserve seven of those finite slots for occasional skywriting work.
+    return season.id > 0 && i % 8 === 7
+      ? skywritingContract(job, wave > 0 ? 1 : 0)
+      : job;
   });
 }
 export type FlightState = {
+  skywriting?: SkywritingState;
+  terrainVersion?: number;
+  rewardVersion?: number;
+  bankedStuntBonus?: number;
+  rewardSequence?: number;
+  rewards?: Simulation['rewards'];
+  rewardKeys?: string[];
+  stunts?: ReturnType<Simulation['stunts']['snapshot']>;
   weather?: Weather | null;
+  integrity?: number;
+  clog?: number;
+  wear?: number;
+  birdHits?: number;
+  lastBirdHit?: number;
+  hazardEvent?: string;
+  hazardEventUntil?: number;
+  crashReason?: string;
+  barnstormed?: boolean;
+  invertedBarnstormed?: boolean;
+  inBarn?: boolean;
+  inBarnInverted?: boolean;
+  barnstormCount?: number;
+  collectibles?: Simulation['collectibles'];
+  turnaroundCombo?: number;
+  lastSprayExitTime?: number;
+  lastSprayExitHeading?: number;
+  arcade?: ReturnType<Simulation['arcade']['snapshot']>;
   x: number;
   y: number;
   z: number;
@@ -138,7 +181,35 @@ export type FlightState = {
 };
 export function serialize(sim: Simulation): FlightState {
   return {
+    terrainVersion: 2,
+    ...(sim.isSkywriting
+      ? { skywriting: structuredClone(sim.skywriting) }
+      : {}),
+    rewardVersion: 2,
+    bankedStuntBonus: sim.bankedStuntBonus,
+    rewardSequence: sim.rewardSequence,
+    rewards: sim.rewards.map((r) => ({ ...r })),
+    rewardKeys: [...sim.rewardKeys],
+    stunts: sim.stunts.snapshot(),
     weather: sim.weather,
+    integrity: sim.integrity,
+    clog: sim.clog,
+    wear: sim.wear,
+    birdHits: sim.birdHits,
+    lastBirdHit: sim.lastBirdHit,
+    hazardEvent: sim.hazardEvent,
+    hazardEventUntil: sim.hazardEventUntil,
+    crashReason: sim.crashReason,
+    barnstormed: sim.barnstormed,
+    invertedBarnstormed: sim.invertedBarnstormed,
+    inBarn: sim.inBarn,
+    inBarnInverted: sim.inBarnInverted,
+    barnstormCount: sim.barnstormCount,
+    collectibles: sim.collectibles.map((item) => ({ ...item })),
+    turnaroundCombo: sim.turnaroundCombo,
+    lastSprayExitTime: sim.lastSprayExitTime,
+    lastSprayExitHeading: sim.lastSprayExitHeading,
+    arcade: sim.arcade.snapshot(),
     x: sim.x,
     y: sim.y,
     z: sim.z,
@@ -161,15 +232,47 @@ export function serialize(sim: Simulation): FlightState {
 }
 export function hydrate(state: FlightState) {
   const sim = new Simulation();
-  Object.assign(sim, state);
+  const { arcade, collectibles, stunts, rewardKeys, skywriting, ...flight } =
+    state;
+  Object.assign(sim, flight);
+  sim.skywriting = skywriting ? structuredClone(skywriting) : freshSkywriting();
+  sim.arcade.restore(arcade);
+  sim.stunts.restore(stunts);
+  sim.rewardKeys = new Set(rewardKeys);
+  sim.rewards = (state.rewards ?? []).map((r) => ({ ...r }));
+  // Old builds credited stunt cash immediately. Never pay it again at settlement.
+  sim.bankedStuntBonus =
+    state.rewardVersion === 2
+      ? (state.bankedStuntBonus ?? 0)
+      : (state.result.stuntBonus ?? 0);
+  // Legacy flights have no pickup ledger; start spawning on their next job
+  // rather than grant a second set of potentially already collected rewards.
+  sim.collectibles = (collectibles ?? []).map((item) => ({ ...item }));
+  // Retain altitude above ground when resuming a pre-hills saved flight.
+  if ((state.terrainVersion ?? 1) < 2)
+    sim.y += ground(state.x, state.z) - legacyGround(state.x, state.z);
   // Saved flights from before overspray penalties start with no deduction.
   sim.oversprayAcres = Math.max(0, state.oversprayAcres ?? 0);
   sim.offTargetFraction = state.offTargetFraction ?? 0;
+  sim.barnstormed = Boolean(state.barnstormed);
+  sim.invertedBarnstormed = Boolean(state.invertedBarnstormed);
   sim.result = {
     ...state.result,
+    maintenance: state.result.maintenance ?? 0,
+    repairs: state.result.repairs ?? 0,
+    debt: state.result.debt ?? 0,
     penalty: state.result.penalty ?? 0,
     total: state.result.total ?? state.result.pay + state.result.bonus,
     oversprayAcres: state.result.oversprayAcres ?? 0,
+    stuntBonus: state.result.stuntBonus ?? 0,
+    cleanBonus:
+      state.rewardVersion !== 2 && state.phase === 'complete'
+        ? 0
+        : (state.result.cleanBonus ?? 0),
+    speedBonus:
+      state.rewardVersion !== 2 && state.phase === 'complete'
+        ? 0
+        : (state.result.speedBonus ?? 0),
   };
   sim.covered = new Set(state.covered);
   return sim;
@@ -242,6 +345,7 @@ export function validateCommand(value: unknown): CountyCommand {
       step.dt <= 0 ||
       step.dt > 0.05 ||
       !step.input ||
+      (step.input.acro !== undefined && typeof step.input.acro !== 'boolean') ||
       keys.some((k) => typeof step.input[k] !== 'boolean')
     )
       throw new Error('Invalid flight controls.');
@@ -276,6 +380,7 @@ export function runFlight(
   return { sim, remaining: Math.max(0, availableTime - duration) };
 }
 export type PublicPilot = {
+  skywriting?: { jobId: number; elapsed: number; smoke: SkySmoke[] };
   id: string;
   callsign: string;
   x: number;
@@ -299,6 +404,7 @@ export type Standing = {
 };
 export type CountySnapshot = {
   weather?: Weather;
+  nextWeather?: Weather;
   compact?: boolean;
   season: Season;
   jobs: CountyJob[];

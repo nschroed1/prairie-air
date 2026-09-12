@@ -1,0 +1,435 @@
+.upgrade-ready-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #e3f5a8;
+  box-shadow: 0 0 9px #e3f5a866;
+}
+.state-overlay {
+  z-index: 20;
+}
+.state-overlay.debrief-overlay {
+  inset: 0;
+}
+.pause-destinations {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 12px 0;
+}
+.pause-destinations button {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  color: #dce8ba;
+  font-size: 12px;
+  min-height: 32px;
+}
+.career-goal,
+.rival-goal {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  text-align: left;
+  width: 100%;
+  gap: 8px;
+  padding: 15px;
+  border: 1px solid #d8e9a838;
+  border-radius: 9px;
+  background: #d4e9a609;
+  color: #e8eed9;
+}
+.career-goal:hover,
+.rival-goal:hover {
+  background: #d4e9a614;
+  border-color: #d8e9a875;
+}
+.goal-heading {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 10px;
+  letter-spacing: 0.09em;
+  color: #c6d89e;
+}
+.goal-heading > svg:last-child {
+  margin-left: auto;
+}
+.career-goal > strong,
+.rival-goal > strong {
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
+  font-size: 15px;
+  font-weight: 550;
+}
+.career-goal > strong > span,
+.rival-goal > strong > span {
+  color: #c4d792;
+  font-size: 12px;
+  white-space: nowrap;
+}
+.career-goal > span:last-child,
+.rival-goal > span:last-child,
+.goal-stat {
+  font-size: 12px;
+  line-height: 1.45;
+  color: #c4d0b8;
+}
+.rival-goal small {
+  color: #aabda0;
+  line-height: 1.5;
+}
+.career-goal [data-slot='progress'],
+.hangar-upgrade [data-slot='progress'] {
+  height: 4px;
+  background: #e1edc419;
+}
+.career-goal [data-slot='progress-indicator'],
+.hangar-upgrade [data-slot='progress-indicator'] {
+  background: #d7e998;
+}
+.career-maxed {
+  font-size: 12px;
+  color: #d2e1ad;
+  line-height: 1.5;
+}
+.mission-goals {
+  grid-column: 1 / -1;
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid #d5e9ab26;
+}
+.mission-goals .career-goal {
+  padding: 0;
+  gap: 7px;
+  border: 0;
+  background: none;
+}
+.mission-goals .career-goal > strong {
+  font-size: 13px;
+}
+.mission-goals .career-goal > span:last-child {
+  font-size: 11px;
+}
+.mission-rival {
+  display: flex;
+  gap: 7px;
+  align-items: center;
+  width: 100%;
+  margin-top: 10px;
+  color: #f0d6a2;
+  text-align: left;
+  font-size: 11px;
+}
+.mission-rival > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.debrief-goals {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 10px;
+  margin: 18px 0;
+}
+.hangar-strategy {
+  margin: 20px 0;
+  max-width: 630px;
+  color: #bdcdb2;
+  font-size: 13px;
+  line-height: 1.65;
+}
+.hangar-upgrades {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+.hangar-upgrade {
+  display: flex;
+  flex-direction: column;
+  padding: 17px;
+  background: #d4e9a605;
+  border: 1px solid #d4e9a620;
+  border-radius: 10px;
+  min-width: 0;
+}
+.hangar-upgrade.upgrade-selected {
+  border-color: #d5e99285;
+  background: #d4e9a60a;
+}
+.upgrade-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 7px;
+  color: #c5d895;
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  margin-bottom: 18px;
+}
+.hangar-upgrade h3 {
+  font-size: 17px;
+  font-weight: 500;
+  margin-bottom: 12px;
+}
+.upgrade-stats {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: #a9bda0;
+}
+.upgrade-stats strong {
+  color: #e0ecbc;
+  font-weight: 500;
+}
+.hangar-upgrade p {
+  font-size: 12px;
+  line-height: 1.6;
+  color: #bacbb0;
+  margin: 16px 0;
+  flex: 1;
+}
+.hangar-upgrade small {
+  color: #cbdca5;
+  font-size: 10px;
+  margin: 8px 0 15px;
+}
+.hangar-upgrade .primary {
+  width: 100%;
+  padding: 11px 9px;
+  font-size: 12px;
+  justify-content: center;
+}
+.goal-select {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  color: #c9dbaa;
+  font-size: 11px;
+  padding: 11px 5px 0;
+}
+.goal-select:hover {
+  text-decoration: underline;
+}
+.county-rival-summary {
+  margin-top: 18px;
+}
+.county-rival-summary .rival-goal {
+  border-left: 2px solid #ead4a2;
+}
+.county-rival-summary > small {
+  display: block;
+  margin-top: 8px;
+  font-size: 12px;
+  color: #c9d3ba;
+}
+.rival-search {
+  display: grid;
+  gap: 8px;
+  margin: 22px 0 8px;
+  font-size: 12px;
+  color: #cad8b4;
+}
+.rival-search input {
+  color: #eff2df;
+}
+.rival-pick {
+  padding: 6px 9px;
+  border: 1px solid #d9e6bc40;
+  border-radius: 5px;
+  font-size: 11px;
+  color: #d9e4b8;
+  white-space: nowrap;
+}
+.rival-pick[aria-pressed='true'] {
+  border-color: #e6cb8780;
+  color: #f1d7a6;
+  background: #eed49c0c;
+}
+.rival-rank {
+  background: #eed49c08;
+}
+.rival-opportunity {
+  border-color: #e4cf8866;
+}
+.county-job .rival-opportunity-label {
+  color: #ecdaa9;
+  font-size: 11px;
+  line-height: 1.5;
+}
+.weather-front {
+  margin: 16px 0;
+  padding: 13px 15px;
+  background: #151f1c35;
+  border: 1px solid #d2e0bc29;
+  border-radius: 8px;
+}
+.front-heading {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: #e3eacb;
+  font-size: 12px;
+}
+.front-heading > span {
+  margin-left: auto;
+  color: #bdcbac;
+  font-size: 10px;
+}
+.weather-front p {
+  font-size: 12px;
+  color: #c5d2ba;
+  margin: 8px 0;
+  line-height: 1.55;
+}
+.weather-front small {
+  color: #a7bca0;
+  font-size: 11px;
+  line-height: 1.55;
+  display: block;
+}
+.front-next {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  color: #e5d5a5;
+  font-size: 11px;
+  line-height: 1.45;
+  margin-top: 7px;
+}
+.front-next b {
+  font-variant-numeric: tabular-nums;
+  font-weight: 550;
+}
+.front-warning {
+  border-color: #e8b97088;
+}
+.flight-forecast {
+  grid-area: 3 / 1;
+  align-self: end;
+  min-width: 0;
+  z-index: 12;
+}
+.flight-forecast .weather-front {
+  margin: 0;
+  background: #14372dde;
+  backdrop-filter: blur(16px);
+}
+@media (min-width: 901px) {
+  .flight-active .flight-message {
+    position: absolute;
+    grid-area: auto;
+    justify-self: start;
+    align-self: auto;
+    top: auto;
+    bottom: 180px;
+    left: 50%;
+    right: auto;
+    width: max-content;
+    max-width: calc(100% - 640px);
+    transform: translateX(-50%);
+  }
+}
+@media (max-height: 800px) and (min-width: 901px) {
+  .flight-active .mission-active {
+    padding: 12px;
+  }
+  .flight-active .mission-active .coverage-label {
+    margin-top: 8px;
+  }
+  .flight-active .mission-active .overspray-summary {
+    margin-top: 8px;
+    padding-top: 8px;
+  }
+  .flight-active .mission-goals {
+    margin-top: 8px;
+    padding-top: 8px;
+  }
+  .flight-active .mission-goals .goal-heading,
+  .flight-active .mission-goals .career-goal [data-slot='progress'],
+  .flight-active .mission-goals .career-goal > span:last-child {
+    display: none;
+  }
+  .flight-active .mission-goals .career-goal > strong {
+    font-size: 12px;
+  }
+  .flight-active .mission-rival {
+    margin-top: 6px;
+  }
+}
+@media (max-width: 900px) {
+  .flight-active .mission-goals {
+    margin-top: 3px;
+    padding-top: 7px;
+  }
+  .mission-goals .career-goal {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 4px 10px;
+  }
+  .mission-goals .goal-heading {
+    display: none;
+  }
+  .mission-goals .career-goal > strong {
+    font-size: 12px;
+    grid-column: 1 / -1;
+  }
+  .mission-goals .career-goal [data-slot='progress'] {
+    align-self: center;
+    min-width: 20px;
+  }
+  .mission-goals .career-goal > span:last-child {
+    font-size: 10px;
+  }
+  .mission-rival {
+    margin-top: 6px;
+  }
+  .flight-forecast {
+    grid-area: 2 / 1 / 3 / -1;
+    align-self: start;
+  }
+  .flight-forecast .weather-front {
+    padding: 7px 10px;
+  }
+  .flight-forecast .front-heading {
+    display: none;
+  }
+  .flight-forecast .front-next {
+    margin: 0;
+    font-size: 10px;
+  }
+}
+@media (max-width: 600px) {
+  .hangar-upgrades {
+    grid-template-columns: 1fr;
+  }
+  .hangar-upgrade {
+    padding: 16px;
+  }
+  .upgrade-heading {
+    margin-bottom: 10px;
+  }
+  .hangar-upgrade p {
+    margin: 10px 0;
+  }
+  .upgrade-stats {
+    font-size: 13px;
+  }
+  .hangar-upgrade .primary {
+    min-height: 42px;
+  }
+  .goal-select {
+    min-height: 38px;
+    padding: 8px 5px 0;
+  }
+  .debrief-goals {
+    grid-template-columns: 1fr;
+  }
+  .pilot-roster > div {
+    flex-wrap: wrap;
+  }
+}

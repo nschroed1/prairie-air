@@ -13,15 +13,20 @@ export type Weather = {
   sunlight: number;
   rain: number;
   nextChangeAt?: number;
+  front?: 'Building' | 'Peak winds' | 'Easing';
+  severity?: 'Gentle' | 'Challenging' | 'Demanding';
 };
 
-export const WEATHER_PERIOD = 30 * 60 * 1000;
+// A shared front builds, peaks, then eases. Four-minute stages give pilots
+// enough time to plan a pass, but make the forecast matter within a session.
+export const WEATHER_PERIOD = 12 * 60 * 1000;
+export const WEATHER_STAGE = WEATHER_PERIOD / 3;
 const profiles = {
   clear: {
     label: 'Clear skies',
     temperature: 76,
     cloud: 0.08,
-    fog: 0.00014,
+    fog: 0.00008,
     sunlight: 3.15,
     rain: 0,
   },
@@ -91,12 +96,68 @@ export const LESSON_WEATHER: Weather = {
   gust: 0.32 / 0.65,
 };
 
-export function countyWeather(now: number): Weather {
+export function countyWeather(now: number, phaseIndex = 0): Weather {
   const period = Math.floor(now / WEATHER_PERIOD);
+  const stage = Math.floor(now / WEATHER_STAGE) % 3;
+  const phase = Math.max(0, Math.min(2, Math.floor(phaseIndex)));
+  const base = weatherFromSeed(period + 1701);
+  const roll = random(period + 4703);
+  const kind: WeatherKind =
+    roll() < [0.1, 0.3, 0.55][phase]
+      ? 'rain'
+      : base.kind === 'rain'
+        ? 'overcast'
+        : base.kind;
+  const wind = [1.4, 3.2, 5.2][phase] + roll() * [1, 1.7, 2][phase];
   return {
-    ...weatherFromSeed(period + 1701),
-    nextChangeAt: (period + 1) * WEATHER_PERIOD,
+    ...base,
+    ...profiles[kind],
+    kind,
+    id: period * 9 + phase * 3 + stage,
+    temperature:
+      base.temperature +
+      profiles[kind].temperature -
+      profiles[base.kind].temperature,
+    label:
+      kind === 'rain'
+        ? (['Light showers', 'Rain showers', 'Passing squalls'] as const)[phase]
+        : profiles[kind].label,
+    windMps: wind * [0.65, 1, 0.78][stage],
+    gust: [0.18, 0.35, 0.55][phase] * [0.7, 1, 0.8][stage],
+    rain: kind === 'rain' ? [0.4, 0.7, 1][phase] : 0,
+    front: (['Building', 'Peak winds', 'Easing'] as const)[stage],
+    severity: (['Gentle', 'Challenging', 'Demanding'] as const)[phase],
+    nextChangeAt: (Math.floor(now / WEATHER_STAGE) + 1) * WEATHER_STAGE,
   };
+}
+
+export function gustKnots(weather: Weather, strength = 1) {
+  return Math.round(weather.windMps * (1 + weather.gust) * strength * 1.944);
+}
+
+export function buffeting(
+  weather: Weather | null,
+  elapsed: number,
+  strength = 1,
+  stability = 0,
+) {
+  if (!weather?.front) return { roll: 0, pitch: 0 };
+  const power =
+    (weather.windMps * weather.gust * strength) / (1 + stability * 0.6);
+  return {
+    roll: Math.sin(elapsed * 1.8) * power * 0.025,
+    pitch: Math.sin(elapsed * 1.3) * power * 0.012,
+  };
+}
+
+export function weatherAdvice(weather: Weather) {
+  if (weather.windMps >= 4)
+    return 'Gusts rock the aircraft: correct small banks, aim upwind, and leave room at field edges.';
+  if (weather.kind === 'rain')
+    return 'Showers reduce visibility. Follow the field map and release spray before turning.';
+  if (weather.windMps >= 2)
+    return 'Watch the landing footprint: gusts push both your aircraft and spray downwind.';
+  return 'A gentler window for clean passes. Build savings before the stronger seasonal winds.';
 }
 
 export function practiceWeather(jobId: number, seed: number): Weather {

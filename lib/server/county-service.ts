@@ -5,7 +5,8 @@ import {
   type CountyStore,
   type ClaimRow,
 } from './county-store';
-import { Simulation } from '../simulation';
+import { Simulation, ground } from '../simulation';
+import { freshSkywriting, SKYWRITING_UNLOCK } from '../skywriting';
 import {
   seasonAt,
   seasonJobs,
@@ -13,6 +14,7 @@ import {
   hydrate,
   runFlight,
   MAX_PILOTS,
+  practiceContract,
   type CountyCommand,
   type CountySnapshot,
   type FlightState,
@@ -41,12 +43,21 @@ export class CountyService {
   standings(season: number) {
     return this.store.standings(season);
   }
+  forecast(now: number) {
+    const season = seasonAt(now);
+    const weather = countyWeather(now, season.phaseIndex);
+    return {
+      ...weather,
+      nextChangeAt: Math.min(weather.nextChangeAt!, season.nextWaveAt),
+    };
+  }
   async snapshot(
     viewerId: string | null,
     compact = false,
   ): Promise<CountySnapshot> {
     const now = this.now(),
-      season = seasonAt(now);
+      season = seasonAt(now),
+      weather = this.forecast(now);
     const [claims, nearby, standings, previousStandings, player] =
       await Promise.all([
         compact
@@ -75,10 +86,17 @@ export class CountyService {
       };
     });
     const pilots: PublicPilot[] = nearby.map((p) => {
-      const f = JSON.parse(p.state) as FlightState;
+      const f = hydrate(JSON.parse(p.state) as FlightState);
       return {
         id: p.id,
         callsign: p.callsign,
+        skywriting: f.isSkywriting
+          ? {
+              jobId: f.job.id,
+              elapsed: f.elapsed,
+              smoke: f.skywriting.smoke.slice(-8),
+            }
+          : undefined,
         x: f.x,
         y: f.y,
         z: f.z,
@@ -93,7 +111,8 @@ export class CountyService {
     });
     return {
       compact,
-      weather: countyWeather(now),
+      weather,
+      nextWeather: this.forecast(weather.nextChangeAt),
       season,
       jobs: compact ? [] : jobs,
       pilots,
@@ -141,8 +160,10 @@ export class CountyService {
       Math.max(0, (now - p.updated_at) / 1000) + p.credit,
     );
     if (p.season !== season.id) {
+      sim.service();
+      const carriedCareer = sim.career;
       sim = new Simulation();
-      sim.career = (JSON.parse(p.state) as FlightState).career;
+      sim.career = carriedCareer;
       sim.career.completed = [];
       active = null;
       credit = 0.15;
@@ -178,13 +199,30 @@ export class CountyService {
     }
     // Apply a county-wide forecast after replaying already-recorded inputs.
     // Clients receive the new weather with this authoritative flight state.
-    sim.weather = countyWeather(now);
+    if (active === null || (!sim.job.challenge && !sim.isSkywriting))
+      sim.weather = this.forecast(now);
+    if (active === null && sim.phase !== 'complete' && sim.job.challenge)
+      sim.job = {
+        ...sim.job,
+        pay: sim.job.challenge.basePay,
+        challenge: undefined,
+        noSprayZones: undefined,
+      };
     if (active === null && sim.job.windStrength !== undefined)
       sim.job = { ...sim.job, windStrength: undefined };
     let selected =
       active === null
         ? null
         : (seasonJobs(season).find((j) => j.id === active) ?? null);
+    // An already-claimed legacy field keeps its saved footprint and acreage.
+    if (selected && sim.job.id === active)
+      selected = {
+        ...selected,
+        ...sim.job,
+        width: sim.job.width,
+        depth: sim.job.depth,
+        boundary: sim.job.boundary,
+      };
     let finished: number | null = null;
     let callsign = p.callsign;
     switch (command.action) {
@@ -196,6 +234,11 @@ export class CountyService {
             409,
           );
         selected = job;
+        if (job.kind === 'skywriting' && sim.career.flights < SKYWRITING_UNLOCK)
+          throw new CountyError(
+            'Complete three jobs before taking a skywriting contract.',
+            409,
+          );
         active = job.id;
         sim.reset(job);
         credit = 0.15;
@@ -204,7 +247,9 @@ export class CountyService {
       case 'finish':
         if (active === null || !sim.finish())
           throw new CountyError(
-            'Reach the coverage target before completing this contract.',
+            sim.isSkywriting
+              ? 'Finish the heart circuit with 80% written and 65% smoke accuracy.'
+              : 'Reach the coverage target before completing this contract.',
             409,
           );
         finished = active;
@@ -215,20 +260,55 @@ export class CountyService {
         sim.spraying = false;
         break;
       case 'resume':
+        if (active === null && sim.isSkywriting && sim.phase === 'complete')
+          sim.phase = 'ready';
         if (sim.phase === 'paused' || sim.phase === 'ready')
           sim.phase = 'flying';
         break;
       case 'refill':
-        if (active === null)
-          throw new CountyError('Claim a field before refilling.', 409);
-        sim.refill();
+        if (active === null) {
+          sim.service();
+          sim.crashReason = '';
+          sim.inBarn = sim.inBarnInverted = false;
+          sim.arcade.reset();
+          sim.tank = sim.tankCapacity;
+          sim.phase = 'flying';
+          sim.spraying = false;
+          sim.offTargetFraction = 0;
+          sim.y = Math.max(sim.y, ground(sim.x, sim.z) + 38);
+        } else {
+          sim.refill();
+        }
         break;
       case 'retry':
-        if (active === null)
-          throw new CountyError('This field is no longer reserved.', 409);
-        sim.reset();
+        if (active === null) {
+          sim.service();
+          sim.crashReason = '';
+          sim.inBarn = sim.inBarnInverted = false;
+          sim.arcade.reset();
+          sim.tank = sim.tankCapacity;
+          sim.x = -170;
+          sim.z = 400;
+          sim.y = ground(-170, 400) + 42;
+          sim.heading = 0;
+          sim.pitch = sim.roll = 0;
+          sim.speed = 44;
+          sim.throttle = 44;
+          sim.phase = 'ready';
+          sim.spraying = false;
+          sim.offTargetFraction = 0;
+        } else {
+          sim.reset();
+        }
         break;
       case 'release':
+        sim.service();
+        sim.job = {
+          ...sim.job,
+          pay: sim.job.challenge?.basePay ?? sim.job.pay,
+          challenge: undefined,
+          noSprayZones: undefined,
+        };
         active = null;
         sim.phase = 'ready';
         sim.spraying = false;
@@ -244,6 +324,11 @@ export class CountyService {
       case 'join':
         if (sim.phase === 'flying') sim.phase = 'paused';
         break;
+    }
+    if (active === null && sim.isSkywriting && sim.phase !== 'complete') {
+      sim.job = { ...practiceContract(), windStrength: undefined };
+      sim.skywriting = freshSkywriting();
+      sim.spraying = false;
     }
     const committed = await this.store.commit({
       id,
@@ -269,7 +354,9 @@ export class CountyService {
       );
     return this.snapshot(
       id,
-      command.action === 'tick' && !command.refreshCounty,
+      command.action === 'tick' &&
+        !command.refreshCounty &&
+        p.season === season.id,
     );
   }
 }

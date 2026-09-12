@@ -1,0 +1,344 @@
+.sky-briefing {
+  display: grid;
+  grid-template-columns: minmax(150px, 0.8fr) minmax(0, 1.4fr);
+  gap: 24px;
+  padding-top: 16px;
+}
+.sky-route-card {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  border: 1px solid #d1dfdf;
+  border-radius: 14px;
+  background: linear-gradient(145deg, #244b61, #527b82);
+  color: #f5eacb;
+  overflow: hidden;
+}
+.sky-pattern {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  max-height: 245px;
+  color: inherit;
+}
+.sky-route-card > span {
+  text-align: center;
+  font-size: 9px;
+  letter-spacing: 1.7px;
+  padding: 0 12px 20px;
+}
+.sky-briefing-copy h3 {
+  font-size: 25px;
+  font-family: Georgia, serif;
+  line-height: 1.15;
+  margin: 12px 0;
+}
+.sky-briefing-copy p,
+.sky-briefing-copy li {
+  font-size: 13px;
+  line-height: 1.65;
+}
+.sky-briefing-copy ol {
+  padding-left: 20px;
+  margin: 14px 0;
+}
+.sky-briefing-copy li {
+  margin: 9px 0;
+}
+.sky-briefing .eyebrow {
+  display: flex;
+  gap: 7px;
+  align-items: center;
+}
+.sky-practice-note {
+  font-size: 12px;
+  line-height: 1.6;
+  color: #c4d3bd;
+}
+.sky-briefing-footer {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  margin-top: 18px;
+  align-items: center;
+  justify-content: space-between;
+}
+.sky-briefing-footer > span {
+  font-size: 11px;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+.sky-offer {
+  display: grid;
+  grid-template-columns: 130px 1fr;
+  gap: 22px;
+  background: #eaf0eb;
+  border: 1px solid #cfdace;
+  border-radius: 12px;
+  padding: 20px;
+  color: #345d67;
+}
+.sky-offer h3 {
+  font-family: Georgia, serif;
+  font-size: 23px;
+  margin: 6px 0;
+  color: #283e34;
+}
+.sky-offer p {
+  font-size: 13px;
+  line-height: 1.6;
+}
+.sky-offer-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin: 12px 0;
+}
+.sky-offer .secondary {
+  font-size: 12px;
+  padding: 10px 12px;
+  color: #254c47;
+  border-color: #7d9a8d;
+}
+.sky-offer .sky-practice-note,
+.sky-offer .sky-targets {
+  color: #496650;
+}
+.sky-offer .eyebrow {
+  color: #466965;
+}
+.sky-reveal-card .eyebrow {
+  color: #4b6353;
+}
+.sky-reveal-card .secondary {
+  color: #365642;
+  border-color: #93a08c;
+}
+.sky-mission .mission-title p {
+  font-size: 11px;
+  margin-top: 8px;
+}
+.sky-score {
+  display: flex;
+  gap: 24px;
+  margin: 22px 0 8px;
+}
+.sky-score small {
+  display: block;
+  font-size: 9px;
+  letter-spacing: 1.4px;
+  color: #bed0b4;
+}
+.sky-score strong {
+  font-size: 29px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+.sky-score em {
+  font-size: 14px;
+  font-style: normal;
+  margin-left: 3px;
+  color: #c4d3bd;
+}
+.sky-score .warning {
+  color: #ffc28a;
+}
+.sky-mission progress {
+  width: 100%;
+  height: 6px;
+  accent-color: #d59740;
+  border: 0;
+  border-radius: 10px;
+  overflow: hidden;
+}
+.sky-mission progress::-webkit-progress-bar {
+  background: #dce4d6;
+}
+.sky-mission progress::-webkit-progress-value {
+  background: #d59740;
+}
+.sky-targets {
+  font-size: 11px;
+  line-height: 1.6;
+  color: #c1d1b6;
+  margin: 7px 0;
+}
+.sky-circuit {
+  display: flex;
+  justify-content: space-between;
+  gap: 15px;
+  font-size: 12px;
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid #d6dfd133;
+}
+.sky-reveal-card {
+  position: absolute;
+  z-index: 35;
+  bottom: 30px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(100% - 40px, 950px);
+  display: flex;
+  align-items: center;
+  gap: 26px;
+  padding: 24px 30px;
+  border-radius: 16px;
+  background: #f8f7edee;
+  border: 1px solid #fff9;
+  box-shadow: 0 15px 65px #132c3840;
+  color: #293d31;
+  backdrop-filter: blur(16px);
+}
+.sky-reveal-card h2 {
+  font-family: Georgia, serif;
+  font-size: 27px;
+  line-height: 1.15;
+  margin: 8px 0;
+}
+.sky-reveal-card p {
+  font-size: 12px;
+  margin: 8px 0 0;
+}
+.sky-reveal-pay {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-left: auto;
+  min-width: 165px;
+}
+.sky-reveal-pay strong {
+  font-size: 21px;
+}
+.sky-reveal-pay small {
+  font-size: 11px;
+  line-height: 1.5;
+  color: #5f6d60;
+}
+.sky-reveal-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 150px;
+}
+.skywriting-active .streak-multiplier-gauge,
+.skywriting-active .deck-hugger-indicator {
+  display: none;
+}
+.skywriting-reveal .mission-card,
+.skywriting-reveal .bottom-hud,
+.skywriting-reveal .minimap,
+.skywriting-reveal .guidance-panel,
+.skywriting-reveal .flight-message,
+.skywriting-reveal .reticle {
+  visibility: hidden;
+}
+.sky-practice-link {
+  margin-left: 12px;
+}
+.skywriting-active .mission-goals {
+  display: none;
+}
+@media (max-width: 700px) {
+  .sky-briefing {
+    grid-template-columns: 1fr;
+    gap: 15px;
+  }
+  .sky-route-card {
+    display: none;
+  }
+  .sky-offer {
+    grid-template-columns: 1fr;
+    gap: 5px;
+    padding: 16px;
+  }
+  .sky-offer > .sky-pattern {
+    height: 110px;
+  }
+  .sky-reveal-card {
+    bottom: 18px;
+    padding: 18px;
+    gap: 14px;
+    flex-wrap: wrap;
+  }
+  .sky-reveal-card h2 {
+    font-size: 23px;
+  }
+  .sky-reveal-pay {
+    margin-left: 0;
+    min-width: 0;
+    flex: 1 1 120px;
+  }
+  .sky-reveal-actions {
+    margin-left: auto;
+  }
+  .sky-practice-link {
+    margin-left: 0;
+  }
+  .sky-score {
+    gap: 12px;
+    margin-top: 15px;
+  }
+  .sky-score strong {
+    font-size: 24px;
+  }
+}
+
+@media (max-width: 560px) {
+  .skywriting-active .mission-card.mission-active {
+    padding: 13px 15px;
+    width: calc(100% - 36px);
+  }
+  .sky-mission {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    column-gap: 16px;
+  }
+  .sky-mission .mission-title,
+  .sky-mission .sky-score,
+  .sky-mission progress,
+  .sky-mission .claim {
+    grid-column: 1 / -1;
+  }
+  .sky-mission .mission-title h2 {
+    font-size: 20px;
+    margin: 0;
+  }
+  .sky-mission .mission-title p {
+    display: block;
+    font-size: 10px;
+    margin: 5px 0 0;
+  }
+  .sky-mission .sky-score {
+    margin: 10px 0 3px;
+    justify-content: space-between;
+  }
+  .sky-mission .sky-score small {
+    font-size: 8px;
+  }
+  .sky-mission .sky-score strong {
+    font-size: 22px;
+  }
+  .sky-mission .sky-targets {
+    font-size: 10px;
+    margin: 6px 0 0;
+  }
+  .sky-mission .sky-circuit {
+    margin: 6px 0 0;
+    padding: 0;
+    border: 0;
+    font-size: 10px;
+  }
+  .sky-mission .sky-targets:last-of-type {
+    display: none;
+  }
+  .sky-mission .overspray-summary {
+    grid-column: 1 / -1;
+    margin-top: 8px;
+    padding-top: 8px;
+  }
+  .skywriting-reveal .touch-controls {
+    display: none;
+  }
+}

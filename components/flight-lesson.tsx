@@ -3,6 +3,10 @@
 /* oxlint-disable next/no-html-link-for-pages -- Native account navigation avoids the deployed Vinext router failure. */
 /* oxlint-disable jsx-a11y/prefer-tag-over-role -- The SVG is a live field diagram with an accessible image description. */
 
+import { ChallengeBrief, NextChallenge } from './flight-challenge';
+import { useId, type ReactNode } from 'react';
+import { fieldOutline } from '@/lib/field-geometry';
+import { upgradeGoal } from '@/lib/progression';
 import {
   ArrowUpRight,
   Check,
@@ -34,9 +38,13 @@ export function FieldPlot({
   covered?: number[];
   label?: string;
 }) {
+  const clipId = useId();
   const { width, depth } = fieldSize(job);
   const left = 228 - width / 2,
     top = 228 - depth / 2;
+  const outline = fieldOutline(job)
+    .map((p) => `${p.x + 228},${p.z + 228}`)
+    .join(' ');
   return (
     <svg
       className="field-plot"
@@ -45,30 +53,131 @@ export function FieldPlot({
       aria-label={label}
     >
       <rect x="-28" y="-28" width="512" height="512" fill="#29473d" />
-      <rect x={left} y={top} width={width} height={depth} fill="#486441" />
-      {Array.from({ length: 38 }, (_, n) => (
-        <path
-          key={`row${n}`}
-          d={`M${left} ${top + (n * depth) / 38}h${width}`}
-          stroke="#718561"
-          strokeOpacity=".32"
-        />
-      ))}
-      {covered.map((n) => (
-        <rect
-          key={n}
-          x={(n % 38) * 12}
-          y={Math.floor(n / 38) * 12}
-          width="12"
-          height="12"
-          fill="#d7ed94"
-        />
-      ))}
-      <rect
-        x={left}
-        y={top}
-        width={width}
-        height={depth}
+      <defs>
+        <clipPath id={clipId}>
+          <polygon points={outline} />
+        </clipPath>
+      </defs>
+      <polygon points={outline} fill="#486441" />
+      <g clipPath={`url(#${clipId})`}>
+        {Array.from({ length: 38 }, (_, n) => (
+          <path
+            key={`row${n}`}
+            d={`M${left} ${top + (n * depth) / 38}h${width}`}
+            stroke="#718561"
+            strokeOpacity=".32"
+          />
+        ))}
+        {covered.map((n) => (
+          <rect
+            key={n}
+            x={(n % 38) * 12 + 0.4}
+            y={Math.floor(n / 38) * 12 + 0.4}
+            width="11.2"
+            height="11.2"
+            fill="#8fe33b"
+            fillOpacity="0.76"
+            stroke="rgba(255, 255, 255, 0.42)"
+            strokeWidth="0.8"
+            rx="0.5"
+          />
+        ))}
+      </g>
+      {(job.noSprayZones ?? []).map((zone, i) => {
+        const kind = (zone as { kind?: string }).kind ?? 'yard';
+        const zx = 228 + zone.x;
+        const zz = 228 + zone.z;
+        return (
+          <g key={i}>
+            <rect
+              x={zx - zone.width / 2}
+              y={zz - zone.depth / 2}
+              width={zone.width}
+              height={zone.depth}
+              fill="#4a392d"
+              stroke="#ffcf83"
+              strokeWidth="3"
+              strokeDasharray="5 4"
+            />
+            {kind === 'barn' ? (
+              <g>
+                <rect
+                  x={zx - 13}
+                  y={zz - 8}
+                  width="26"
+                  height="16"
+                  fill="#9e2b1b"
+                  stroke="#ffffff"
+                  strokeWidth="1.5"
+                  rx="1"
+                />
+                <polygon
+                  points={`${zx - 15},${zz - 8} ${zx},${zz - 17} ${zx + 15},${zz - 8}`}
+                  fill="#dad2be"
+                  stroke="#ffffff"
+                  strokeWidth="1.5"
+                />
+                <rect
+                  x={zx - 5}
+                  y={zz - 4}
+                  width="10"
+                  height="12"
+                  fill="#2a1f18"
+                  stroke="#ffffff"
+                  strokeWidth="1"
+                />
+                <line
+                  x1={zx - 5}
+                  y1={zz - 4}
+                  x2={zx + 5}
+                  y2={zz + 8}
+                  stroke="#ffffff"
+                  strokeWidth="1"
+                />
+                <line
+                  x1={zx + 5}
+                  y1={zz - 4}
+                  x2={zx - 5}
+                  y2={zz + 8}
+                  stroke="#ffffff"
+                  strokeWidth="1"
+                />
+              </g>
+            ) : kind === 'silo' ? (
+              <g>
+                <rect
+                  x={zx - 7}
+                  y={zz - 9}
+                  width="14"
+                  height="18"
+                  fill="#8c989c"
+                  stroke="#ffffff"
+                  strokeWidth="1.2"
+                  rx="2"
+                />
+                <path
+                  d={`M ${zx - 7} ${zz - 9} A 7 7 0 0 1 ${zx + 7} ${zz - 9} Z`}
+                  fill="#cad6da"
+                  stroke="#ffffff"
+                  strokeWidth="1.2"
+                />
+              </g>
+            ) : (
+              <text
+                x={zx}
+                y={zz + 5}
+                textAnchor="middle"
+                fontSize="17"
+                fill="#ffe9b1"
+              >
+                ×
+              </text>
+            )}
+          </g>
+        );
+      })}
+      <polygon
+        points={outline}
         fill="none"
         stroke="#f3f9d5"
         strokeWidth="3"
@@ -88,9 +197,11 @@ export function FlightBriefing({
   job,
   onFly,
   weather,
+  sessionOnly = false,
 }: {
   job: Contract;
   weather?: Weather | null;
+  sessionOnly?: boolean;
   onFly: () => void;
 }) {
   return (
@@ -108,6 +219,7 @@ export function FlightBriefing({
                 : job.difficulty}
         </span>
         <p>{job.briefing ?? job.note}</p>
+        <ChallengeBrief job={job} />
         <ol className="lesson-steps">
           <li>
             <b>1</b>
@@ -139,8 +251,10 @@ export function FlightBriefing({
           </span>
         </div>
         <p className="lesson-fine">
-          Practice pay and upgrades stay in this browser. Off-field spray costs
-          $40/ac.
+          {sessionOnly
+            ? 'Preview progress lasts for this session. '
+            : 'Practice pay and upgrades stay in this browser. '}
+          Off-field spray costs $40/ac.
         </p>
         <button className="primary" onClick={onFly}>
           Start this flight <ArrowUpRight size={18} />
@@ -174,6 +288,29 @@ export function FlightCoach({
       </div>
       <strong>{coach.title}</strong>
       <p>{coach.detail}</p>
+      {coach.recovery && (
+        <div
+          className="coach-bearing"
+          aria-label={`Approach bearing ${Math.round(coach.recovery.bearing)} degrees, ${Math.round(coach.recovery.distance)} meters away`}
+        >
+          <span
+            className="bearing-arrow"
+            style={{ transform: `rotate(${coach.recovery.relative}deg)` }}
+            aria-hidden="true"
+          >
+            ↑
+          </span>
+          <b>
+            {String(Math.round(coach.recovery.bearing) % 360).padStart(3, '0')}°
+          </b>
+          <span>
+            {coach.recovery.distance >= 1000
+              ? `${(coach.recovery.distance / 1000).toFixed(1)} km`
+              : `${Math.round(coach.recovery.distance / 10) * 10} m`}{' '}
+            to approach
+          </span>
+        </div>
+      )}
       <div
         className="coach-progress"
         aria-label={`Lesson step ${coach.step + 1} of 4`}
@@ -202,6 +339,7 @@ export function FlightDebrief({
   onNext,
   onHangar,
   onReplay,
+  progression,
 }: {
   sim: Simulation;
   practice: boolean;
@@ -211,11 +349,12 @@ export function FlightDebrief({
   onNext: () => void;
   onHangar: () => void;
   onReplay: () => void;
+  progression?: ReactNode;
 }) {
   'use no memo';
   const result = sim.result;
   return (
-    <div className="state-overlay">
+    <div className="state-overlay debrief-overlay">
       <section className="flight-debrief" aria-label="Flight debrief">
         <div className="debrief-heading">
           <span className="lesson-kicker">
@@ -261,15 +400,59 @@ export function FlightDebrief({
                 <dt>Precision bonus</dt>
                 <dd>+{money(result.bonus)}</dd>
               </div>
+              {Boolean(sim.pendingSkillBonus) && (
+                <div className="stunt-bonus">
+                  <dt>Flight skill &amp; token bonuses</dt>
+                  <dd>+{money(sim.pendingSkillBonus)}</dd>
+                </div>
+              )}
+              {Boolean(result.cleanBonus) && (
+                <div className="stunt-bonus">
+                  <dt>Clean finish bonus</dt>
+                  <dd>+{money(result.cleanBonus)}</dd>
+                </div>
+              )}
+              {Boolean(result.speedBonus) && (
+                <div className="stunt-bonus">
+                  <dt>Under-par bonus</dt>
+                  <dd>+{money(result.speedBonus)}</dd>
+                </div>
+              )}
               <div className={result.penalty ? 'deduction' : ''}>
                 <dt>Overspray · {result.oversprayAcres.toFixed(2)} ac</dt>
                 <dd>−{money(result.penalty)}</dd>
+              </div>
+              <div className="deduction">
+                <dt>Maintenance</dt>
+                <dd>−{money(result.maintenance ?? 0)}</dd>
+              </div>
+              <div className="deduction">
+                <dt>Repairs &amp; boom service</dt>
+                <dd>−{money(result.repairs ?? 0)}</dd>
               </div>
               <div className="receipt-total">
                 <dt>{practice ? 'Practice earnings' : 'Take-home pay'}</dt>
                 <dd>{money(result.total)}</dd>
               </div>
             </dl>
+            {sim.bankedStuntBonus > 0 && (
+              <p className="lesson-fine">
+                Previously banked flight bonuses: {money(sim.bankedStuntBonus)}.
+                Already in your wallet; excluded from this deposit.
+              </p>
+            )}
+            {Boolean(result.debt) && (
+              <p className="workshop-tab">
+                Workshop credit remaining: <b>{money(result.debt)}</b>. Paid
+                from future jobs; you can keep flying.
+              </p>
+            )}
+            {Boolean(sim.job.challenge?.dangerPay) && (
+              <p className="lesson-fine">
+                Contract pay includes {money(sim.job.challenge!.dangerPay)}{' '}
+                danger pay.
+              </p>
+            )}
             {practice && (
               <p className="personal-best">
                 <Check size={16} />
@@ -289,6 +472,8 @@ export function FlightDebrief({
             {debriefTip(sim)}
           </span>
         </p>
+        <NextChallenge flights={sim.career.flights} />
+        {progression}
         {nextJob && (
           <div className="next-contract">
             <div>
@@ -314,7 +499,9 @@ export function FlightDebrief({
           )}
           <button className="secondary" onClick={onHangar}>
             <Wrench size={16} />
-            {sim.career.cash >= 600 ? 'Choose an upgrade' : 'Visit the hangar'}
+            {upgradeGoal(sim.career)?.remaining === 0
+              ? 'Choose an upgrade'
+              : 'Visit the hangar'}
           </button>
           {practice && (
             <button className="text-button" onClick={onReplay}>

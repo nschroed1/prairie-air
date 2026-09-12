@@ -167,7 +167,7 @@ void test('the Supabase adapter persists the overspray receipt and net leaderboa
         'SELECT earnings FROM public.prairie_payouts WHERE job=100',
       )
     ).rows[0];
-    assert.equal(Number(receipt.earnings), 1550);
+    assert.equal(Number(receipt.earnings), 1650);
     const saved = (
       await db.query<{ state: string }>(
         "SELECT state FROM public.prairie_pilots WHERE id='alice'",
@@ -176,8 +176,8 @@ void test('the Supabase adapter persists the overspray receipt and net leaderboa
     const flight = JSON.parse(saved.state) as ReturnType<typeof initialFlight>;
     assert.equal(flight.oversprayAcres, 2.5);
     assert.equal(flight.result.penalty, 100);
-    assert.equal(flight.result.total, 1550);
-    assert.equal(flight.career.cash, 1550);
+    assert.equal(flight.result.total, 1650);
+    assert.equal(flight.career.cash, 1650);
   } finally {
     await db.close();
   }

@@ -21,7 +21,7 @@ import {
   debriefTip,
 } from '../lib/flight-guidance';
 
-void test('the starter uses four short strips; public county dimensions and scoring stay unchanged', () => {
+void test('the starter retains four short strips while county parcels vary within the saved grid', () => {
   const sim = new Simulation();
   sim.reset(contracts[0]);
   assert.equal(fieldCellCount(sim.job), 384);
@@ -37,10 +37,16 @@ void test('the starter uses four short strips; public county dimensions and scor
   sim.y = ground(sim.x, sim.z) + 19;
   assert.equal(spraySafety(sim), 'safe');
   for (const job of seasonJobs(seasonAt())) {
-    assert.deepEqual(fieldSize(job), { width: 456, depth: 452 });
-    assert.equal(fieldCellCount(job), 1444);
+    const size = fieldSize(job);
+    assert.ok(size.width <= 456 && size.depth <= 452);
+    assert.ok(fieldCellCount(job) > 300 && fieldCellCount(job) <= 1444);
+    assert.ok(job.boundary && job.boundary.length >= 4);
     assert.equal(job.windStrength, undefined);
   }
+  assert.equal(
+    fieldCellCount({ ...contracts[0], width: undefined, depth: undefined }),
+    1444,
+  );
 });
 
 void test('flying the guided starter strips can complete the contract and fund a first upgrade', () => {
@@ -133,7 +139,7 @@ void test('the footprint warns before the edge and includes wind drift and upgra
   );
 });
 
-void test('the second job creates stronger physical drift than the first lesson', () => {
+void test('the second starter job increases drift gently before career storms unlock', () => {
   const displacement = (job: (typeof contracts)[number]) => {
     const sim = new Simulation();
     sim.reset(job);
@@ -141,7 +147,7 @@ void test('the second job creates stronger physical drift than the first lesson'
     for (let i = 0; i < 60; i++) sim.step(1 / 60, freshControls());
     return sim.x - x;
   };
-  assert.ok(displacement(contracts[1]) > displacement(contracts[0]) * 8);
+  assert.ok(displacement(contracts[1]) > displacement(contracts[0]) * 2);
 });
 
 void test('line-up assistance is only for the flying starter and preserves resources and earnings', () => {
@@ -193,4 +199,49 @@ void test('debrief coaching explains deductions before suggesting extra coverage
   assert.match(debriefTip(sim), /dark strips/);
   sim.result.bonus = 250;
   assert.match(debriefTip(sim), /Willow Creek/);
+});
+
+void test('missing the starter at zero coverage offers a return bearing and resource-neutral recovery', () => {
+  const sim = new Simulation();
+  sim.reset(contracts[0]);
+  assert.equal(
+    coachMessage(sim).step,
+    0,
+    'The initial approach should not ask for a turn',
+  );
+  const before = { tank: sim.tank, cash: sim.career.cash };
+  // Fly straight past the whole first field without spraying.
+  for (let i = 0; i < 900; i++) sim.step(1 / 60, freshControls());
+  assert.equal(sim.coverage, 0);
+  const coach = coachMessage(sim);
+  assert.equal(coach.step, 2);
+  assert.equal(coach.title, 'Return to your approach');
+  assert.ok(coach.recovery && coach.recovery.distance > 400);
+  assert.ok(
+    Math.abs(coach.recovery.bearing - 180) < 5,
+    'The return is south of a northbound overshoot',
+  );
+  assert.equal(lineUpLesson(sim), true);
+  assert.equal(sim.coverage, 0);
+  assert.equal(sim.tank, before.tank);
+  assert.equal(sim.career.cash, before.cash);
+  assert.equal(coachMessage(sim).step, 0);
+});
+
+void test('recovery recognizes bad lateral approaches, but does not interrupt an in-field spray pass', () => {
+  const sim = new Simulation();
+  sim.reset(contracts[0]);
+  sim.x = sim.job.x + 250;
+  sim.y = ground(sim.x, sim.z) + 19;
+  assert.equal(coachMessage(sim).title, 'Return to your approach');
+  assert.equal(lineUpLesson(sim), true);
+  sim.z = sim.job.z;
+  sim.y = ground(sim.x, sim.z) + 19;
+  assert.equal(coachMessage(sim).step, 1);
+  sim.heading = Math.PI;
+  assert.equal(
+    coachMessage(sim).step,
+    1,
+    'A safe reversed pass remains usable',
+  );
 });

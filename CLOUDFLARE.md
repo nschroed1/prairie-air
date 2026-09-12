@@ -4,6 +4,10 @@ The Cloudflare deployment uses Workers for the game and API, and the existing Su
 
 Live URL: https://playprairieair.com
 
+Latest release: September 6, 2026, version `1414fc68-8b53-4a03-af17-1ba53924fff7`. Publishes the gameplay polish pass: shared stunt detection, contract-settled rewards after maintenance and repairs, fresh-coverage bonuses, achievable maneuvers and optional aerobatic rolls, clearer bonus/upgrade guidance, reduced motion, corrected gamepad releases, farm roofs and chase-camera clearance, and a flyable river trestle. Includes the preceding graphics, terrain, audio, progression, weather and multiplayer changes. All 186 automated tests, type checks, targeted lint, and the Cloudflare build/dry-run passed. Production homepage, account page, county and auth configuration return successfully; all 16 JavaScript, CSS and audio files match the validated build byte for byte. The refreshed production browser loads the new bundle and renders the scene without console errors or warnings. Evidence: `.wrangler/polish-production-verify/report.json` and `.wrangler/polish-release-manifest.json`. This release did not repeat a live two-account multiplayer session or full career playthrough.
+
+Previous release for rollback: `fdc1f479-40cb-4463-ada7-1d40e35d122d`.
+
 The original https://prairie-air.extremecode-767.workers.dev address remains available. The custom domain is declared in `wrangler.cloudflare.jsonc`, so future deployments preserve it.
 
 The deployment is complete. Password authentication and shared contracts passed live API checks. Resend custom SMTP is enabled with a verified sending domain; signup/reset delivery and callback flows still need an end-to-end test. See `supabase/SETUP.md` for current status.

@@ -158,9 +158,8 @@
   color: #e4efc8;
 }
 .county-jobs {
-  max-height: 330px;
-  overflow: auto;
-  padding-right: 5px;
+  /* The dialog owns vertical scrolling; the board does not nest a second scroll area. */
+  padding-right: 0;
   scrollbar-color: #78965b #16362c;
   scrollbar-width: thin;
 }
@@ -505,4 +504,126 @@
   margin: 0 0 0 auto;
   font-size: 12px;
   align-self: center;
+}
+
+/* A compact season summary leaves room to compare real field requirements. */
+.county-season {
+  margin-bottom: 10px;
+}
+.county-season h3 {
+  font-size: 25px;
+  margin: 7px 0 5px;
+}
+.county-season p {
+  font-size: 12px;
+  line-height: 1.5;
+}
+.season-waves {
+  margin: 10px 0 14px;
+}
+.county-flight-actions {
+  margin-bottom: 12px;
+}
+.county-forecast {
+  font-size: 12px;
+  line-height: 1.5;
+  color: #c6d9ba;
+  margin: 0 0 12px;
+}
+.county-job {
+  display: grid;
+  grid-template-columns: 94px minmax(0, 1fr) auto;
+  gap: 15px;
+}
+.county-job h4 {
+  font-size: 22px;
+  margin: 6px 0;
+}
+.county-job p {
+  font-size: 13px;
+  line-height: 1.5;
+  margin: 3px 0;
+}
+.county-job .field-dimensions {
+  font-size: 12px;
+  color: #b4c8a5;
+}
+.county-job .field-requirements {
+  color: #e5eec3;
+}
+.county-field-preview {
+  align-self: start;
+  border: 1px solid #b8d1a63d;
+  border-radius: 6px;
+  overflow: hidden;
+}
+.county-field-preview svg {
+  width: 100%;
+  display: block;
+}
+.county-field-preview > span {
+  display: block;
+  text-align: center;
+  font-size: 9px;
+  padding: 5px 2px;
+  color: #d9e6c2;
+}
+.field-location {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 7px;
+  font-size: 11px;
+  color: #b8cdb0;
+}
+.field-location svg {
+  flex: none;
+}
+.field-owner {
+  display: block;
+  margin-top: 6px;
+}
+.field-payment .primary {
+  font-size: 12px;
+}
+@media (max-width: 620px) {
+  .county-job {
+    grid-template-columns: 67px minmax(0, 1fr);
+    gap: 9px 12px;
+  }
+  .county-job h4 {
+    font-size: 21px;
+  }
+  .county-job small {
+    font-size: 10px;
+    letter-spacing: 0.04em;
+  }
+  .county-job .field-payment {
+    grid-column: 2;
+    flex-direction: row;
+    flex-wrap: wrap;
+    justify-content: flex-start;
+    align-items: center;
+    gap: 5px 12px;
+  }
+  .county-job .field-payment .primary {
+    margin: 4px 0 0;
+    width: 100%;
+    justify-content: space-between;
+  }
+  .county-job .field-payment small {
+    font-size: 11px;
+  }
+  .county-season .eyebrow {
+    font-size: 10px;
+  }
+  .county-season p {
+    font-size: 12px;
+  }
+  .season-waves {
+    font-size: 10px;
+  }
+  .field-filters button {
+    font-size: 12px;
+  }
 }

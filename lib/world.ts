@@ -1,15 +1,49 @@
+import { farmRotation } from './landmark-data';
+import { HazardWorld } from './hazard-world';
+import { SkywritingWorld } from './skywriting-world';
+import { skyAudienceView } from './skywriting';
 import * as T from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import type { CountySnapshot, PublicPilot } from './county';
+import { createRiverMaterial } from './fx/water-shader';
+import { applyCropWindAndShadows } from './fx/crop-wind-shader';
+import { AircraftFX } from './fx/aircraft-fx';
+import { ArcadeFX } from './fx/arcade-fx';
+import { CinematicCamera } from './fx/cinematic-camera';
+import { StuntWorldProps } from './fx/stunt-props';
+import { createCropGeometry, createCropMaterial } from './fx/crop-models';
+import {
+  createBarnwoodMaterial,
+  createCorrugatedRoofMaterial,
+  createFarmhouseClapboardMaterial,
+  createSiloMaterial,
+  createGlassMaterial,
+  buildEnhancedBarn,
+  buildEnhancedSilo,
+  buildEnhancedHouse,
+} from './fx/building-materials';
+import { SunRays } from './fx/sun-rays';
+import { CloudSystem } from './fx/cloud-systems';
+import { SkyLifeSystem } from './fx/sky-life';
+import { TreeSystem } from './fx/tree-systems';
 import {
   ground,
-  fieldSize,
+  insideField,
   riverX,
   fields,
   Simulation,
   type Field,
   type Controls,
 } from './simulation';
+import {
+  clipField,
+  inNoSprayZone,
+  fieldCells,
+  fieldOutline,
+  parcelShape,
+  polygonArea,
+  type FieldShape,
+} from './field-geometry';
 
 import { nextPass, sprayFootprint, spraySafety } from './flight-guidance';
 import {
@@ -39,6 +73,22 @@ const fieldLookup = new Map(
   fields.map((f) => [`${Math.round(f.x / 510)},${Math.round(f.z / 510)}`, f]),
 );
 
+export type RemotePilotEntry = {
+  mesh: T.Group;
+  target: PublicPilot;
+  targetPos: T.Vector3;
+  targetQuat: T.Quaternion;
+  labelSprite?: T.Sprite;
+  labelCanvas?: HTMLCanvasElement;
+  lastLabelKey?: string;
+  lastDistanceUpdate?: number;
+  sprayPoints?: T.Points;
+  sprayPositions?: Float32Array;
+  sprayLife?: Float32Array;
+  sprayIndex?: number;
+  lastNearMissTime?: number;
+};
+
 export class World {
   scene = new T.Scene();
   camera = new T.PerspectiveCamera(55, 1, 1, 14000);
@@ -48,13 +98,22 @@ export class World {
   marker = new T.Group();
   guidesEnabled = true;
   guidanceAvailable = true;
-  guideLine = new T.Line(
+  guideLine = new T.Mesh(
     new T.BufferGeometry(),
-    new T.LineBasicMaterial({
+    new T.MeshBasicMaterial({
       color: '#ffffff',
-      transparent: true,
-      opacity: 0.85,
-      depthTest: false,
+      depthTest: true,
+      depthWrite: false,
+      side: T.DoubleSide,
+    }),
+  );
+  guideBorder = new T.Mesh(
+    new T.BufferGeometry(),
+    new T.MeshBasicMaterial({
+      color: '#103e42',
+      depthTest: true,
+      depthWrite: false,
+      side: T.DoubleSide,
     }),
   );
   footprintLine = new T.Line(
@@ -72,7 +131,10 @@ export class World {
       side: T.DoubleSide,
     }),
   );
-  coverageMesh: T.InstancedMesh;
+  coverageMesh: T.Mesh<T.BufferGeometry, T.MeshBasicMaterial>;
+  coverageLineMesh: T.LineSegments<T.BufferGeometry, T.LineBasicMaterial>;
+  coverageTiles = new Map<number, number[]>();
+  coverageLineTiles = new Map<number, number[]>();
   particles: T.Points;
   particlePositions = new Float32Array(2100);
   particleLife = new Float32Array(700);
@@ -87,22 +149,43 @@ export class World {
   time = 0;
   lastCoverage = -1;
   currentJob = -1;
+  currentBoundary = '';
   cameraMode = 0;
+  reducedMotion = false;
+  private lastCameraPlane = new T.Vector3();
   resizeObserver: ResizeObserver;
   onFrame: (() => void) | null = null;
   beforeStep: ((dt: number) => void) | null = null;
-  otherPilots = new Map<string, { mesh: T.Group; target: PublicPilot }>();
+  rivalCallsign: string | null = null;
+  rivalPilotId: string | null = null;
+  onRemoteProximity:
+    | ((dist: number, speed: number, pan: number) => void)
+    | null = null;
+  otherPilots = new Map<string, RemotePilotEntry>();
   cropMaterials: { material: T.MeshStandardMaterial; color: T.Color }[] = [];
   seasonalPhase = -1;
   disposed = false;
   sky: T.Mesh | null = null;
   environmentTarget: T.WebGLRenderTarget | null = null;
   windTime = { value: 0 };
+  windVectorUniform = { value: new T.Vector2(0, 0) };
+  aircraftFx!: AircraftFX;
+  arcadeFx!: ArcadeFX;
+  cinematicCamera!: CinematicCamera;
+  stuntProps!: StuntWorldProps;
+  stuntGroup = new T.Group();
+  cameraImpulse = 0;
+  sunRays!: SunRays;
+  skyLife!: SkyLifeSystem;
+  treeSystem?: TreeSystem;
   ruralLife: RuralLife;
+  hazards: HazardWorld;
+  skywriting!: SkywritingWorld;
   countyForecast: Weather | null = null;
   weatherCover = { value: 0.08 };
   cloudMaterial: T.MeshStandardMaterial | null = null;
   cloudMesh: T.InstancedMesh | null = null;
+  cloudSystem!: CloudSystem;
   rainLevel = 0;
   rainPositions = new Float32Array(900 * 6);
   rain: T.LineSegments;
@@ -115,6 +198,10 @@ export class World {
     color: T.Color;
     crop: Field['crop'];
   }[] = [];
+  collectiblesGroup = new T.Group();
+  collectiblesLayout = '';
+  collectibleMeshes: { mesh: T.Group; id: number }[] = [];
+  private skyRevealWasActive = false;
   constructor(
     public host: HTMLElement,
     public sim: Simulation,
@@ -135,8 +222,8 @@ export class World {
       'aria-label',
       'Three-dimensional flight over Iowa farmland',
     );
-    this.scene.fog = new T.FogExp2('#c4d8ca', 0.00014);
-    this.scene.add(new T.HemisphereLight('#b9dbff', '#596730', 1.55));
+    this.scene.fog = new T.FogExp2('#bdd6e0', 0.00008);
+    this.scene.add(new T.HemisphereLight('#b9dbff', '#47572b', 1.25));
     this.sun = new T.DirectionalLight('#ffe3a8', 3.15);
     this.sun.position.copy(SUN_OFFSET);
     this.sun.castShadow = true;
@@ -152,6 +239,8 @@ export class World {
     this.scene.add(this.sun, this.sun.target);
     this.createSky();
     this.createEnvironment();
+    this.sunRays = new SunRays(this.scene, this.cloudGroup, this.sun);
+    this.skyLife = new SkyLifeSystem(this.scene, this.sun);
     this.createLand();
     this.createFarms();
     this.batchStatic(this.scene);
@@ -178,14 +267,23 @@ export class World {
     this.scene.add(
       this.plane,
       this.marker,
+      this.guideBorder,
       this.guideLine,
       this.footprintLine,
       this.footprintFill,
+      this.collectiblesGroup,
     );
-    this.guideLine.geometry.setAttribute(
-      'position',
-      new T.BufferAttribute(new Float32Array(18), 3),
-    );
+    for (const mesh of [this.guideLine, this.guideBorder]) {
+      mesh.geometry.setAttribute(
+        'position',
+        new T.BufferAttribute(new Float32Array(5 * 100 * 6 * 3), 3).setUsage(
+          T.DynamicDrawUsage,
+        ),
+      );
+      mesh.frustumCulled = false;
+    }
+    this.guideBorder.renderOrder = 1;
+    this.guideLine.renderOrder = 2;
     this.footprintLine.geometry.setAttribute(
       'position',
       new T.BufferAttribute(new Float32Array(15), 3),
@@ -198,20 +296,46 @@ export class World {
       this.footprintLine.frustumCulled =
       this.footprintFill.frustumCulled =
         false;
-    this.coverageMesh = new T.InstancedMesh(
-      new T.PlaneGeometry(11.8, 11.8),
+    const coverageGeometry = new T.BufferGeometry();
+    coverageGeometry.setAttribute(
+      'position',
+      new T.BufferAttribute(new Float32Array(1444 * 18 * 3), 3).setUsage(
+        T.DynamicDrawUsage,
+      ),
+    );
+    this.coverageMesh = new T.Mesh(
+      coverageGeometry,
       new T.MeshBasicMaterial({
-        color: '#b5ef72',
+        color: '#8fe33b',
         transparent: true,
-        opacity: 0.26,
+        opacity: 0.3,
         depthWrite: false,
         side: T.DoubleSide,
       }),
-      1444,
     );
-    this.coverageMesh.count = 0;
+    this.coverageMesh.geometry.setDrawRange(0, 0);
     this.coverageMesh.frustumCulled = false;
     this.scene.add(this.coverageMesh);
+
+    const coverageLineGeometry = new T.BufferGeometry();
+    coverageLineGeometry.setAttribute(
+      'position',
+      new T.BufferAttribute(new Float32Array(1444 * 16 * 3), 3).setUsage(
+        T.DynamicDrawUsage,
+      ),
+    );
+    this.coverageLineMesh = new T.LineSegments(
+      coverageLineGeometry,
+      new T.LineBasicMaterial({
+        color: '#f0fdf4',
+        transparent: true,
+        opacity: 0.38,
+        depthWrite: false,
+      }),
+    );
+    this.coverageLineMesh.geometry.setDrawRange(0, 0);
+    this.coverageLineMesh.frustumCulled = false;
+    this.scene.add(this.coverageLineMesh);
     const pg = new T.BufferGeometry();
     pg.setAttribute(
       'position',
@@ -249,6 +373,17 @@ export class World {
     this.particles = new T.Points(pg, sprayMaterial);
     this.particles.frustumCulled = false;
     this.scene.add(this.particles);
+    this.aircraftFx = new AircraftFX(this.scene, this.plane);
+    this.skywriting = new SkywritingWorld(this.scene);
+    this.arcadeFx = new ArcadeFX(this.scene, this.plane, this.camera, false);
+    this.cinematicCamera = new CinematicCamera(
+      this.renderer,
+      this.scene,
+      this.camera,
+    );
+    this.stuntGroup.name = 'Stunt World Props';
+    this.scene.add(this.stuntGroup);
+    this.stuntProps = new StuntWorldProps(this.scene, this.stuntGroup);
     this.resizeObserver = new ResizeObserver(() => this.resize());
     this.resizeObserver.observe(host);
     this.resize();
@@ -256,6 +391,7 @@ export class World {
     this.camera.position
       .copy(this.plane.position)
       .add(new T.Vector3(27, 16, 39));
+    this.hazards = new HazardWorld(this.scene);
     this.frame = requestAnimationFrame(this.animate);
   }
   particleTexture() {
@@ -316,8 +452,8 @@ export class World {
         void main(){
           vec3 d=normalize(vDirection);float height=max(d.y,0.0);
           float sun=max(dot(d,sunDirection),0.0);
-          vec3 horizon=mix(vec3(.56,.73,.73),vec3(.88,.75,.50),pow(sun,8.0)*.45);
-          vec3 color=mix(horizon,vec3(.045,.27,.56),pow(height,.48));
+          vec3 horizon=mix(vec3(.42,.66,.82),vec3(.88,.75,.50),pow(sun,8.0)*.45);
+          vec3 color=mix(horizon,vec3(.025,.22,.55),pow(height,.48));
           color+=vec3(1.,.57,.20)*pow(sun,20.0)*.18;
           color+=vec3(1.,.80,.48)*pow(sun,220.0)*.28;
           color+=vec3(3.8,3.0,1.8)*smoothstep(.99955,.99985,sun);
@@ -336,54 +472,10 @@ export class World {
     this.sky = new T.Mesh(new T.SphereGeometry(11000, 32, 16), material);
     this.sky.renderOrder = -2;
     this.scene.add(this.sky);
-    const cloudMaterial = mat('#f5f1df', { roughness: 1 });
-    this.cloudMaterial = cloudMaterial;
-    cloudMaterial.onBeforeCompile = (shader) => {
-      shader.vertexShader = 'varying float vCloudY;\n' + shader.vertexShader;
-      shader.vertexShader = shader.vertexShader.replace(
-        '#include <begin_vertex>',
-        '#include <begin_vertex>\nvCloudY=position.y;',
-      );
-      shader.fragmentShader =
-        'varying float vCloudY;\n' + shader.fragmentShader;
-      shader.fragmentShader = shader.fragmentShader.replace(
-        '#include <color_fragment>',
-        '#include <color_fragment>\ndiffuseColor.rgb *= mix(vec3(.59,.69,.78),vec3(1.0),smoothstep(-.8,.45,vCloudY));',
-      );
-    };
-    cloudMaterial.customProgramCacheKey = () => 'prairie-cumulus-v2';
-    const clouds = new T.InstancedMesh(
-      new T.SphereGeometry(1, 10, 7),
-      cloudMaterial,
-      480,
-    );
-    const skyRandom = random(911);
-    let index = 0;
-    for (let n = 0; n < 60; n++) {
-      const x = (skyRandom() - 0.5) * 15000;
-      const z = (skyRandom() - 0.5) * 15000;
-      const y = 680 + skyRandom() * 550;
-      const size = 65 + skyRandom() * 80;
-      for (let puff = 0; puff < 8; puff++) {
-        const radius = size * (0.45 + skyRandom() * 0.7);
-        dummy.position.set(
-          x + (skyRandom() - 0.5) * size * 3.6,
-          y + (puff < 4 ? 0 : radius * 0.35),
-          z + (skyRandom() - 0.5) * size * 1.2,
-        );
-        dummy.rotation.set(0, skyRandom() * 6, 0);
-        dummy.scale.set(
-          radius * 1.5,
-          radius * (puff < 4 ? 0.42 : 0.85),
-          radius,
-        );
-        dummy.updateMatrix();
-        clouds.setMatrixAt(index++, dummy.matrix);
-      }
-    }
-    this.cloudMesh = clouds;
-    clouds.frustumCulled = false;
-    this.cloudGroup.add(clouds);
+    this.cloudSystem = new CloudSystem(this.scene, this.sun);
+    this.cloudMaterial = this.cloudSystem.cumulusMat;
+    this.cloudMesh = this.cloudSystem.cumulusMesh;
+    this.cloudGroup.add(this.cloudSystem.group);
     this.scene.add(this.cloudGroup);
   }
   createEnvironment() {
@@ -391,7 +483,7 @@ export class World {
     const environment = new T.Scene();
     environment.add(new T.Mesh(this.sky.geometry, this.sky.material));
     const generator = new T.PMREMGenerator(this.renderer);
-    this.environmentTarget = generator.fromScene(environment, 0.05, 1, 15000);
+    this.environmentTarget = generator.fromScene(environment, 0, 1, 15000);
     this.scene.environment = this.environmentTarget.texture;
     this.scene.environmentIntensity = 0.38;
     generator.dispose();
@@ -489,8 +581,44 @@ export class World {
     m.castShadow = false;
     return m;
   }
+  fieldPatch(
+    shape: FieldShape,
+    x: number,
+    z: number,
+    material: T.Material,
+    offset = 0.08,
+    step = 28,
+  ) {
+    const polygon = fieldOutline(shape),
+      vertices: number[] = [];
+    for (let zz = -228; zz < 228; zz += step)
+      for (let xx = -228; xx < 228; xx += step) {
+        const cell = clipField(
+          polygon,
+          xx,
+          zz,
+          Math.min(228, xx + step),
+          Math.min(228, zz + step),
+        );
+        if (polygonArea(cell) < 1e-7) continue;
+        for (let i = 1; i < cell.length - 1; i++)
+          for (const p of [cell[0], cell[i + 1], cell[i]])
+            vertices.push(p.x, ground(x + p.x, z + p.z) + offset, p.z);
+      }
+    const geometry = new T.BufferGeometry();
+    geometry.setAttribute(
+      'position',
+      new T.Float32BufferAttribute(vertices, 3),
+    );
+    geometry.computeVertexNormals();
+    const mesh = this.addMesh(geometry, material, x, 0, z);
+    mesh.castShadow = false;
+    return mesh;
+  }
   createLand() {
-    this.landPatch(18000, 18000, 0, 0, mat('#668443'), -0.4, 170);
+    const grass = mat('#668443');
+    this.landPatch(18000, 18000, 0, 0, grass, -10, 170);
+    this.landPatch(7200, 7200, 0, 0, grass, -0.65, 240);
     const palettes = {
       corn: ['#879b35', '#a1a53a', '#959b3c'],
       soybeans: ['#417b37', '#518b3b', '#608e3d'],
@@ -503,46 +631,20 @@ export class World {
       if (material) return material;
       material = mat(palettes[crop][shade]);
       this.cropMaterials.push({ material, color: material.color.clone() });
-      material.onBeforeCompile = (shader) => {
-        shader.uniforms.cropKind = {
-          value: crop === 'pasture' ? 2 : crop === 'corn' ? 0 : 1,
-        };
-        shader.vertexShader = 'varying vec3 vField;\n' + shader.vertexShader;
-        shader.vertexShader = shader.vertexShader.replace(
-          '#include <begin_vertex>',
-          '#include <begin_vertex>\nvField=(modelMatrix*vec4(position,1.0)).xyz;',
-        );
-        shader.fragmentShader =
-          'varying vec3 vField; uniform float cropKind;\n' +
-          shader.fragmentShader;
-        shader.fragmentShader = shader.fragmentShader.replace(
-          '#include <color_fragment>',
-          `#include <color_fragment>
-          vec2 p=vField.xz;
-          float row=p.x*2.244;
-          float aa=1.0-smoothstep(.35,2.8,fwidth(row));
-          float rows=(.5+.5*sin(row))*aa;
-          float distanceFade=1.0-smoothstep(180.,1300.,length(vViewPosition));
-          float broad=.5+.5*sin(p.x*.075+sin(p.y*.006));
-          float mottling=sin(p.x*.025+sin(p.y*.017))*sin(p.y*.028)*.05;
-          float colorRows=mix(.79,1.13,rows);
-          float pasture=.94+.06*sin(p.x*.04+p.y*.009);
-          diffuseColor.rgb *= mix(mix(1.0,colorRows,distanceFade*.7),pasture,step(1.5,cropKind));
-          diffuseColor.rgb *= .93+.08*broad+mottling;
-          vec2 field=mod(p+vec2(255.),510.)-vec2(255.);
-          float edge=max(abs(field.x)/228.,abs(field.y)/226.);
-          diffuseColor.rgb *= mix(1.0,.76,smoothstep(.92,.995,edge));`,
-        );
-      };
-      material.customProgramCacheKey = () => 'prairie-fields-v3';
+      applyCropWindAndShadows(
+        material,
+        crop,
+        this.windTime,
+        this.windVectorUniform,
+        { value: this.cloudGroup.position },
+      );
       fieldMaterials.set(key, material);
       return material;
     };
     const fieldRandom = random(37);
     fields.forEach((f) =>
-      this.landPatch(
-        f.w,
-        f.d,
+      this.fieldPatch(
+        f,
         f.x,
         f.z,
         fieldMaterial(f.crop, Math.floor(fieldRandom() * 3)),
@@ -560,14 +662,13 @@ export class World {
             : (x - z) % 4 === 0
               ? 'pasture'
               : 'soybeans';
-        this.landPatch(
-          480,
-          480,
+        this.fieldPatch(
+          parcelShape(x, z),
           x * 510,
           z * 510,
           fieldMaterial(crop, Math.floor(fieldRandom() * 3)),
           0.04,
-          4,
+          90,
         );
       }
     const roadMat = mat('#b6aa89');
@@ -586,16 +687,18 @@ export class World {
     roadMat.customProgramCacheKey = () => 'prairie-gravel-v2';
     const verge = mat('#8d9860');
     for (let n = -6; n <= 6; n++) {
-      this.landPatch(6500, 17, 0, n * 510 + 255, verge, 0.12, 120);
-      this.landPatch(17, 6500, n * 510 + 255, 0, verge, 0.13, 120);
-      this.landPatch(6500, 10, 0, n * 510 + 255, roadMat, 0.2, 120);
-      this.landPatch(10, 6500, n * 510 + 255, 0, roadMat, 0.21, 120);
+      this.landPatch(6500, 17, 0, n * 510 + 255, verge, 0.12, 320);
+      this.landPatch(17, 6500, n * 510 + 255, 0, verge, 0.13, 320);
+      this.landPatch(6500, 10, 0, n * 510 + 255, roadMat, 0.2, 320);
+      this.landPatch(10, 6500, n * 510 + 255, 0, roadMat, 0.21, 320);
     }
     const ribbon = (width: number, elevation: number, material: T.Material) => {
       const vertices: number[] = [],
+        uvs: number[] = [],
         indices: number[] = [];
       for (let i = 0; i <= 360; i++) {
-        const z = -8500 + (i / 360) * 17000,
+        const v = i / 360;
+        const z = -8500 + v * 17000,
           x = riverX(z);
         const w = width * (1 + Math.sin(z * 0.008) * 0.07);
         vertices.push(
@@ -606,6 +709,7 @@ export class World {
           ground(x + w, z) + elevation,
           z,
         );
+        uvs.push(0, v, 1, v);
         if (i < 360) {
           const j = i * 2;
           indices.push(j, j + 2, j + 1, j + 1, j + 2, j + 3);
@@ -613,6 +717,7 @@ export class World {
       }
       const g = new T.BufferGeometry();
       g.setAttribute('position', new T.Float32BufferAttribute(vertices, 3));
+      g.setAttribute('uv', new T.Float32BufferAttribute(uvs, 2));
       g.setIndex(indices);
       g.computeVertexNormals();
       const mesh = this.addMesh(g, material, 0, 0, 0);
@@ -621,160 +726,33 @@ export class World {
     };
     ribbon(125, 0.6, mat('#6b8b48'));
     ribbon(67, 0.87, mat('#ada477'));
-    const water = mat('#3c929b', { metalness: 0.38, roughness: 0.24 });
-    water.onBeforeCompile = (shader) => {
-      shader.uniforms.waterTime = this.windTime;
-      shader.vertexShader =
-        'varying vec3 vWater; uniform float waterTime;\n' + shader.vertexShader;
-      shader.vertexShader = shader.vertexShader.replace(
-        '#include <begin_vertex>',
-        '#include <begin_vertex>\ntransformed.y+=sin(position.z*.075+waterTime*.8)*.13;vWater=position;',
-      );
-      shader.fragmentShader =
-        'varying vec3 vWater; uniform float waterTime;\n' +
-        shader.fragmentShader;
-      shader.fragmentShader = shader.fragmentShader.replace(
-        '#include <color_fragment>',
-        `#include <color_fragment>
-        float ripples=sin(vWater.x*.22+vWater.z*.11+waterTime*1.5)*sin(vWater.z*.26-waterTime*.8);
-        float flow=sin(vWater.x*.013+vWater.z*.023+waterTime*.12);
-        diffuseColor.rgb*=.89+.12*flow+.035*ripples;`,
-      );
-      shader.fragmentShader = shader.fragmentShader.replace(
-        '#include <normal_fragment_begin>',
-        `#include <normal_fragment_begin>
-        vec3 rippleNormal=vec3(cos(vWater.x*.22+waterTime)*.09,0.,sin(vWater.z*.26-waterTime*.8)*.12);
-        normal=normalize(normal+mat3(viewMatrix)*rippleNormal);`,
-      );
-    };
-    water.customProgramCacheKey = () => 'prairie-river-v2';
-    ribbon(54, 1.17, water);
+    const water = createRiverMaterial(this.windTime, this.sun.position);
+    ribbon(58, 1.17, water);
     this.createTrees();
     this.createCropDetail();
   }
   createTrees() {
-    const trunkMaterial = mat('#65573d');
-    const crownMaterial = mat('#638945', { flatShading: false });
-    this.foliageMaterials.push({
-      material: crownMaterial,
-      color: crownMaterial.color.clone(),
+    this.treeSystem = new TreeSystem(this.scene, {
+      windTime: this.windTime,
+      sunDir: this.sun.position,
+      count: 2000,
     });
-    const trunks = new T.InstancedMesh(
-      new T.CylinderGeometry(0.65, 1.1, 8, 5),
-      trunkMaterial,
-      1700,
-    );
-    const crowns = new T.InstancedMesh(
-      new T.IcosahedronGeometry(1, 1),
-      crownMaterial,
-      5100,
-    );
-    const treeRandom = random(621);
-    for (let i = 0; i < 1700; i++) {
-      let x: number, z: number;
-      if (i < 690) {
-        z = (treeRandom() - 0.5) * 7300;
-        x =
-          riverX(z) + (treeRandom() > 0.5 ? 1 : -1) * (83 + treeRandom() * 72);
-      } else {
-        const field = fields[Math.floor(treeRandom() * fields.length)];
-        x = field.x + (treeRandom() - 0.5) * 450;
-        z =
-          field.z +
-          (treeRandom() > 0.5 ? 238 : -238) +
-          (treeRandom() - 0.5) * 9;
-      }
-      const height = 9 + treeRandom() * 14,
-        base = ground(x, z),
-        angle = treeRandom() * 6;
-      dummy.position.set(x, base + height * 0.28, z);
-      dummy.rotation.set(0, angle, 0);
-      dummy.scale.set(0.9, height / 12, 0.9);
-      dummy.updateMatrix();
-      trunks.setMatrixAt(i, dummy.matrix);
-      const treeColor = new T.Color().setHSL(
-        0.22 + treeRandom() * 0.07,
-        0.3 + treeRandom() * 0.16,
-        0.64 + treeRandom() * 0.22,
-      );
-      for (let lobe = 0; lobe < 3; lobe++) {
-        const offset = lobe === 0 ? 0 : height * 0.19;
-        dummy.position.set(
-          x + Math.cos(angle + lobe * 2.3) * offset,
-          base + height * (lobe === 0 ? 0.77 : 0.63),
-          z + Math.sin(angle + lobe * 2.3) * offset,
-        );
-        dummy.scale.set(
-          height * (lobe === 0 ? 0.32 : 0.28),
-          height * (lobe === 0 ? 0.4 : 0.3),
-          height * 0.3,
-        );
-        dummy.updateMatrix();
-        crowns.setMatrixAt(i * 3 + lobe, dummy.matrix);
-        crowns.setColorAt(i * 3 + lobe, treeColor);
-      }
+    for (const crownMat of this.treeSystem.crownMaterials) {
+      this.foliageMaterials.push({
+        material: crownMat,
+        color: crownMat.color.clone(),
+      });
     }
-    trunks.castShadow = true;
-    crowns.castShadow = true;
-    crowns.receiveShadow = true;
-    this.scene.add(trunks, crowns);
   }
   createCropDetail() {
     for (const crop of ['corn', 'soybeans', 'pasture'] as const) {
-      const pieces: T.BufferGeometry[] = [];
-      const height = crop === 'corn' ? 2.1 : crop === 'soybeans' ? 0.72 : 0.58;
-      const width = crop === 'corn' ? 1.2 : crop === 'soybeans' ? 1.35 : 0.55;
-      for (let side = 0; side < 3; side++) {
-        const shape = new T.Shape();
-        shape.moveTo(-width * 0.5, 0);
-        shape.lineTo(-width * 0.14, height * 0.53);
-        shape.lineTo(-width * 0.48, height * 0.63);
-        shape.lineTo(-width * 0.07, height * 0.72);
-        shape.lineTo(0, height);
-        shape.lineTo(width * 0.1, height * 0.71);
-        shape.lineTo(width * 0.45, height * 0.59);
-        shape.lineTo(width * 0.15, height * 0.48);
-        shape.lineTo(width * 0.5, 0);
-        shape.closePath();
-        const blade = new T.ShapeGeometry(shape);
-        blade.rotateY((side * Math.PI) / 3);
-        pieces.push(blade);
-      }
-      const geometry = mergeGeometries(pieces)!;
-      pieces.forEach((g) => g.dispose());
-      const material = mat(
-        crop === 'corn'
-          ? '#a2b64f'
-          : crop === 'soybeans'
-            ? '#669744'
-            : '#87a74a',
-        { side: T.DoubleSide, roughness: 1 },
-      );
+      const geometry = createCropGeometry(crop);
+      const material = createCropMaterial(crop, this.windTime);
       this.cropDetailMaterials.push({
         material,
         color: material.color.clone(),
         crop,
       });
-      material.onBeforeCompile = (shader) => {
-        shader.uniforms.windTime = this.windTime;
-        shader.vertexShader = 'uniform float windTime;\n' + shader.vertexShader;
-        shader.vertexShader = shader.vertexShader.replace(
-          '#include <begin_vertex>',
-          `#include <begin_vertex>
-          #ifdef USE_INSTANCING
-            float sway=sin(windTime*1.7+instanceMatrix[3].x*.037+instanceMatrix[3].z*.026);
-            transformed.x+=sway*position.y*position.y*.065;
-          #endif`,
-        );
-        shader.fragmentShader = shader.fragmentShader.replace(
-          '#include <color_fragment>',
-          `#include <color_fragment>
-          float distanceFade=1.0-smoothstep(145.,210.,length(vViewPosition));
-          float screenDoor=fract(sin(dot(gl_FragCoord.xy,vec2(12.9898,78.233)))*43758.5453);
-          if(screenDoor>distanceFade)discard;`,
-        );
-      };
-      material.customProgramCacheKey = () => 'prairie-wind-crops-v2';
       const mesh = new T.InstancedMesh(geometry, material, 11000);
       mesh.count = 0;
       mesh.frustumCulled = false;
@@ -788,7 +766,7 @@ export class World {
   updateCropDetail(force = false) {
     const cx = Math.round(this.sim.x / 70) * 70,
       cz = Math.round(this.sim.z / 70) * 70;
-    const cell = `${cx},${cz}`;
+    const cell = `${cx},${cz}:${this.sim.job.challenge?.seed ?? 'none'}:${this.guidanceAvailable}`;
     const visible = this.sim.y - ground(this.sim.x, this.sim.z) < 210;
     for (const mesh of Object.values(this.cropDetail)) mesh.visible = visible;
     if (!visible || (!force && cell === this.detailCell)) return;
@@ -801,9 +779,10 @@ export class World {
         );
         if (
           !field ||
-          Math.abs(x - field.x) > 224 ||
-          Math.abs(z - field.z) > 222 ||
-          inFarmClearing(x, z)
+          !insideField(field, x, z) ||
+          inFarmClearing(x, z) ||
+          (this.guidanceAvailable &&
+            inNoSprayZone(this.sim.job, x - this.sim.job.x, z - this.sim.job.z))
         )
           continue;
         // Hash absolute plant coordinates so overlapping tiles keep identical plants.
@@ -834,45 +813,30 @@ export class World {
     }
   }
   createFarms() {
-    const red = mat('#a7402b'),
-      roof = mat('#e3dfc4'),
-      white = mat('#e6e6cd'),
-      dark = mat('#35473c'),
-      silo = mat('#b3bdba', { metalness: 0.35, roughness: 0.5 });
+    const red = createBarnwoodMaterial('#9e2b1b'),
+      roof = createCorrugatedRoofMaterial('#d5d2be'),
+      white = createFarmhouseClapboardMaterial('#f2efe9'),
+      dark = mat('#283832', { roughness: 0.9 }),
+      silo = createSiloMaterial(),
+      glass = createGlassMaterial();
+    let farmIndex = 0;
     for (const [x, z] of FARMSTEADS) {
       const p = new T.Group();
       p.position.set(x, ground(x, z), z);
-      p.rotation.y = rng() * 0.5;
+      p.rotation.y = farmRotation(farmIndex);
       this.scene.add(p);
-      this.box(28, 15, 44, red, 0, 7.5, 0, p);
-      const top = new T.CylinderGeometry(20, 20, 45, 3);
-      top.rotateY(Math.PI / 2);
-      top.rotateX(Math.PI / 2);
-      this.addMesh(top, roof, 0, 18, 0, p);
-      this.box(10, 11, 0.4, dark, 0, 5.5, 22.3, p);
-      this.box(0.6, 12, 0.8, white, 0, 6, 22.6, p);
-      this.box(11, 0.6, 0.8, white, 0, 11.7, 22.6, p);
-      for (let q = -1; q <= 1; q += 2) {
-        const beam = this.box(0.5, 13, 0.6, white, q * 2.8, 5.7, 22.8, p);
-        beam.rotation.z = q * 0.45;
-      }
-      this.addMesh(new T.CylinderGeometry(8, 8, 27, 18), silo, 32, 13.5, -8, p);
-      this.addMesh(
-        new T.SphereGeometry(8, 18, 10, 0, Math.PI * 2, 0, Math.PI / 2),
-        silo,
-        32,
-        27,
-        -8,
-        p,
-      );
-      this.box(18, 10, 16, white, -36, 5, 10, p);
-      const r1 = this.box(12, 1, 20, dark, -40, 12, 10, p);
-      r1.rotation.z = 0.6;
-      const r2 = this.box(12, 1, 20, dark, -31, 12, 10, p);
-      r2.rotation.z = -0.6;
+      const isBig = farmIndex % 2 === 0;
+      const barnScale = isBig ? 1.28 : 0.88;
+      const barnGroup = new T.Group();
+      barnGroup.scale.set(barnScale, barnScale, barnScale);
+      p.add(barnGroup);
+      buildEnhancedBarn(barnGroup, red, roof, white, dark);
+      buildEnhancedSilo(p, silo, white, 32 * (isBig ? 1.15 : 0.95), -8);
+      buildEnhancedHouse(p, white, dark, glass, white);
       for (let f = -2; f <= 2; f++)
         this.box(1, 4, 1, white, -70 + f * 14, 2, 48, p);
       this.box(57, 0.7, 0.6, white, -70, 2.8, 48, p);
+      farmIndex++;
     }
     // Round hay bales and a farm lane add scale during low passes.
     const hayMaterial = mat('#c0a45b', { roughness: 1 });
@@ -885,8 +849,17 @@ export class World {
     const pastures = fields.filter((f) => f.crop === 'pasture');
     for (let i = 0; i < 72; i++) {
       const field = pastures[i % pastures.length];
-      const x = field.x + (hayRandom() - 0.5) * 340,
-        z = field.z + (hayRandom() - 0.5) * 340;
+      let x = field.x,
+        z = field.z;
+      for (let attempt = 0; attempt < 10; attempt++) {
+        const px = field.x + (hayRandom() - 0.5) * field.width * 0.85;
+        const pz = field.z + (hayRandom() - 0.5) * field.depth * 0.85;
+        if (insideField(field, px, pz)) {
+          x = px;
+          z = pz;
+          break;
+        }
+      }
       dummy.position.set(x, ground(x, z) + 2.15, z);
       dummy.rotation.set(Math.PI / 2, 0, hayRandom() * 6);
       dummy.scale.setScalar(1);
@@ -1174,8 +1147,21 @@ export class World {
     spinner.rotation.x = -Math.PI / 2;
   }
   updateMarker() {
-    if (this.currentJob === this.sim.job.id) return;
+    this.marker.visible = !this.sim.isSkywriting;
+    if (this.sim.isSkywriting) return;
+    const shapeKey = JSON.stringify([
+      this.sim.job.width,
+      this.sim.job.depth,
+      this.sim.job.boundary,
+      this.sim.job.noSprayZones,
+    ]);
+    if (
+      this.currentJob === this.sim.job.id &&
+      this.currentBoundary === shapeKey
+    )
+      return;
     this.currentJob = this.sim.job.id;
+    this.currentBoundary = shapeKey;
     while (this.marker.children.length) {
       const child = this.marker.children[0];
       this.marker.remove(child);
@@ -1185,77 +1171,207 @@ export class World {
       }
     }
     const { x, z } = this.sim.job;
-    const { width, depth } = fieldSize(this.sim.job);
-    const hw = width / 2,
-      hd = depth / 2;
+    const outline = fieldOutline(this.sim.job);
     const points: T.Vector3[] = [];
-    for (let i = 0; i <= 100; i++) {
-      const t = (i / 100) * 4;
-      let px: number, pz: number;
-      if (t < 1) {
-        px = -hw + width * t;
-        pz = hd;
-      } else if (t < 2) {
-        px = hw;
-        pz = hd - depth * (t - 1);
-      } else if (t < 3) {
-        px = hw - width * (t - 2);
-        pz = -hd;
-      } else {
-        px = -hw;
-        pz = -hd + depth * (t - 3);
+    for (let i = 0; i < outline.length; i++) {
+      const a = outline[i],
+        b = outline[(i + 1) % outline.length];
+      const steps = Math.ceil(Math.hypot(b.x - a.x, b.z - a.z) / 12);
+      for (let j = 0; j < steps; j++) {
+        const px = x + a.x + ((b.x - a.x) * j) / steps,
+          pz = z + a.z + ((b.z - a.z) * j) / steps;
+        points.push(new T.Vector3(px, ground(px, pz) + 2, pz));
       }
-      points.push(new T.Vector3(x + px, ground(x + px, z + pz) + 2, z + pz));
     }
+    points.push(points[0].clone());
+    const boundaryPositions: number[] = [];
+    for (let i = 0; i < points.length - 1; i++) {
+      const a = points[i],
+        b = points[i + 1];
+      const length = Math.hypot(b.x - a.x, b.z - a.z) || 1;
+      const nx = (-(b.z - a.z) / length) * 1.5,
+        nz = ((b.x - a.x) / length) * 1.5;
+      const corners = [
+        [a.x + nx, a.z + nz],
+        [a.x - nx, a.z - nz],
+        [b.x - nx, b.z - nz],
+        [b.x + nx, b.z + nz],
+      ];
+      for (const corner of [0, 1, 2, 0, 2, 3]) {
+        const [px, pz] = corners[corner];
+        boundaryPositions.push(px, ground(px, pz) + 2.8, pz);
+      }
+    }
+    const boundary = new T.BufferGeometry();
+    boundary.setAttribute(
+      'position',
+      new T.Float32BufferAttribute(boundaryPositions, 3),
+    );
     this.marker.add(
-      new T.Line(
-        new T.BufferGeometry().setFromPoints(points),
-        new T.LineBasicMaterial({
-          color: '#edffc1',
-          transparent: true,
-          opacity: 0.8,
-        }),
+      new T.Mesh(
+        boundary,
+        new T.MeshBasicMaterial({ color: '#ffc84b', side: T.DoubleSide }),
       ),
     );
-    for (const dx of [-hw, hw])
-      for (const dz of [-hd, hd]) {
-        const h = ground(x + dx, z + dz);
-        const pole = this.addMesh(
-          new T.CylinderGeometry(0.28, 0.28, 12, 6),
-          mat('#e5edbb'),
-          x + dx,
-          h + 6,
-          z + dz,
-          this.marker,
+    for (const { x: dx, z: dz } of outline) {
+      const h = ground(x + dx, z + dz);
+      const pole = this.addMesh(
+        new T.CylinderGeometry(0.28, 0.28, 12, 6),
+        mat('#e5edbb'),
+        x + dx,
+        h + 6,
+        z + dz,
+        this.marker,
+      );
+      pole.castShadow = false;
+      const flag = this.addMesh(
+        new T.PlaneGeometry(5, 2.5),
+        new T.MeshBasicMaterial({ color: '#ffd15c', side: T.DoubleSide }),
+        x + dx + 2.5,
+        h + 11,
+        z + dz,
+        this.marker,
+      );
+      flag.castShadow = false;
+    }
+    this.coverageTiles.clear();
+    this.coverageLineTiles.clear();
+    for (const [n, polygon] of fieldCells(this.sim.job)) {
+      const vertices: number[] = [];
+      for (let i = 1; i < polygon.length - 1; i++)
+        for (const p of [polygon[0], polygon[i + 1], polygon[i]])
+          vertices.push(x + p.x, ground(x + p.x, z + p.z) + 2.65, z + p.z);
+      this.coverageTiles.set(n, vertices);
+
+      const lineVerts: number[] = [];
+      const len = polygon.length;
+      for (let j = 0; j < len; j++) {
+        const p1 = polygon[j];
+        const p2 = polygon[(j + 1) % len];
+        lineVerts.push(
+          x + p1.x,
+          ground(x + p1.x, z + p1.z) + 2.7,
+          z + p1.z,
+          x + p2.x,
+          ground(x + p2.x, z + p2.z) + 2.7,
+          z + p2.z,
         );
-        pole.castShadow = false;
-        const flag = this.addMesh(
-          new T.PlaneGeometry(5, 2.5),
-          new T.MeshBasicMaterial({ color: '#e6f999', side: T.DoubleSide }),
-          x + dx + 2.5,
-          h + 11,
-          z + dz,
-          this.marker,
-        );
-        flag.castShadow = false;
       }
+      this.coverageLineTiles.set(n, lineVerts);
+    }
     this.lastCoverage = -1;
+  }
+  updateCollectibles(dt: number) {
+    const layout = JSON.stringify([
+      this.sim.job.id,
+      this.sim.collectibles.map(({ id, kind, x, y, z }) => [id, kind, x, y, z]),
+    ]);
+    if (this.collectiblesLayout !== layout) {
+      this.collectiblesLayout = layout;
+      while (this.collectiblesGroup.children.length) {
+        const child = this.collectiblesGroup.children[0];
+        this.collectiblesGroup.remove(child);
+        child.traverse((o) => {
+          if (o instanceof T.Mesh) {
+            o.geometry.dispose();
+            if (Array.isArray(o.material))
+              o.material.forEach((m) => m.dispose());
+            else (o.material as T.Material).dispose();
+          }
+        });
+      }
+      this.collectibleMeshes = [];
+      if (!this.sim.collectibles.length) return;
+      const coinMat = new T.MeshStandardMaterial({
+        color: '#ffb703',
+        metalness: 0.85,
+        roughness: 0.2,
+        emissive: '#fb8500',
+        emissiveIntensity: 0.25,
+      });
+      const coinRimMat = new T.MeshStandardMaterial({
+        color: '#ffd166',
+        metalness: 0.9,
+        roughness: 0.15,
+        emissive: '#ffb703',
+        emissiveIntensity: 0.3,
+      });
+      const canisterMat = new T.MeshStandardMaterial({
+        color: '#00b4d8',
+        metalness: 0.5,
+        roughness: 0.3,
+        emissive: '#0077b6',
+        emissiveIntensity: 0.35,
+      });
+      const canisterAccentMat = new T.MeshStandardMaterial({
+        color: '#90e0ef',
+        metalness: 0.7,
+        roughness: 0.2,
+      });
+
+      for (const item of this.sim.collectibles) {
+        const group = new T.Group();
+        group.position.set(item.x, item.y, item.z);
+        if (item.kind === 'cash') {
+          const disc = new T.Mesh(
+            new T.CylinderGeometry(1.8, 1.8, 0.4, 16),
+            coinMat,
+          );
+          disc.rotation.x = Math.PI / 2;
+          const rim = new T.Mesh(
+            new T.TorusGeometry(1.8, 0.18, 8, 20),
+            coinRimMat,
+          );
+          group.add(disc, rim);
+        } else if (item.kind === 'refill') {
+          const can = new T.Mesh(
+            new T.CylinderGeometry(1.1, 1.1, 2.5, 14),
+            canisterMat,
+          );
+          const cap = new T.Mesh(
+            new T.CylinderGeometry(0.5, 0.5, 0.6, 12),
+            canisterAccentMat,
+          );
+          cap.position.y = 1.4;
+          const band = new T.Mesh(
+            new T.TorusGeometry(1.15, 0.12, 8, 16),
+            canisterAccentMat,
+          );
+          group.add(can, cap, band);
+        }
+        this.collectiblesGroup.add(group);
+        this.collectibleMeshes.push({ mesh: group, id: item.id });
+      }
+    }
+
+    for (const entry of this.collectibleMeshes) {
+      const item = this.sim.collectibles.find((c) => c.id === entry.id);
+      if (!item || item.collected) {
+        entry.mesh.visible = false;
+        continue;
+      }
+      entry.mesh.visible = true;
+      entry.mesh.rotation.y += dt * 3.0;
+      entry.mesh.position.y =
+        item.y + Math.sin(this.time * 3.5 + item.id * 1.5) * 0.45;
+    }
   }
   updateGuides() {
     const visible =
+      !this.sim.isSkywriting &&
       this.guidesEnabled &&
       this.guidanceAvailable &&
       (this.sim.phase === 'flying' || this.sim.phase === 'paused');
-    this.guideLine.visible =
+    this.guideBorder.visible =
+      this.guideLine.visible =
       this.footprintLine.visible =
       this.footprintFill.visible =
         visible;
     if (!visible) return;
     const pass = nextPass(this.sim);
-    const { depth } = fieldSize(this.sim.job);
     const direction = pass.heading === 0 ? 1 : -1;
-    const start = this.sim.job.z + direction * (depth / 2 + 65);
-    const end = this.sim.job.z - (direction * depth) / 2;
+    const start = pass.heading === 0 ? pass.maxZ + 65 : pass.minZ - 65;
+    const end = pass.heading === 0 ? pass.minZ : pass.maxZ;
     const lineX = pass.x - this.sim.sprayDrift;
     const route = [
       [lineX, start],
@@ -1265,9 +1381,48 @@ export class World {
       [lineX + 9, end + direction * 18],
       [lineX, end],
     ];
-    const line = this.guideLine.geometry.attributes.position;
-    route.forEach(([x, z], i) => line.setXYZ(i, x, ground(x, z) + 3.2, z));
-    line.needsUpdate = true;
+    // World-space ribbons stay visible at flight height; a dark keyline separates white from pale crops.
+    for (const [mesh, halfWidth] of [
+      [this.guideBorder, 2.6],
+      [this.guideLine, 0.85],
+    ] as const) {
+      const line = mesh.geometry.attributes.position;
+      let vertex = 0;
+      for (let segment = 0; segment < route.length - 1; segment++) {
+        const [ax, az] = route[segment],
+          [bx, bz] = route[segment + 1];
+        const length = Math.hypot(bx - ax, bz - az) || 1;
+        const nx = (-(bz - az) / length) * halfWidth,
+          nz = ((bx - ax) / length) * halfWidth;
+        const steps = Math.ceil(length / 14);
+        for (let s = 0; s < steps; s++) {
+          const x0 = ax + ((bx - ax) * s) / steps,
+            z0 = az + ((bz - az) * s) / steps;
+          const x1 = ax + ((bx - ax) * (s + 1)) / steps,
+            z1 = az + ((bz - az) * (s + 1)) / steps;
+          if (
+            inNoSprayZone(
+              this.sim.job,
+              (x0 + x1) / 2 - this.sim.job.x,
+              (z0 + z1) / 2 - this.sim.job.z,
+            )
+          )
+            continue;
+          const corners = [
+            [x0 + nx, z0 + nz],
+            [x0 - nx, z0 - nz],
+            [x1 - nx, z1 - nz],
+            [x1 + nx, z1 + nz],
+          ];
+          for (const corner of [0, 1, 2, 0, 2, 3]) {
+            const [x, z] = corners[corner];
+            line.setXYZ(vertex++, x, ground(x, z) + 3.3, z);
+          }
+        }
+      }
+      mesh.geometry.setDrawRange(0, vertex);
+      line.needsUpdate = true;
+    }
     const points = sprayFootprint(this.sim);
     const outline = this.footprintLine.geometry.attributes.position;
     [...points, points[0]].forEach((p, i) =>
@@ -1300,30 +1455,44 @@ export class World {
     this.plane.rotation.set(this.sim.pitch, -this.sim.heading, this.sim.roll);
   }
   updateCoverage() {
+    this.coverageMesh.visible = this.coverageLineMesh.visible =
+      !this.sim.isSkywriting;
     if (this.lastCoverage === this.sim.coverageVersion) return;
     this.lastCoverage = this.sim.coverageVersion;
     let i = 0;
+    const positions = this.coverageMesh.geometry.attributes.position;
+    let li = 0;
+    const linePositions = this.coverageLineMesh.geometry.attributes.position;
     this.sim.covered.forEach((n) => {
-      const x = this.sim.job.x - 228 + (n % 38) * 12 + 6,
-        z = this.sim.job.z - 228 + Math.floor(n / 38) * 12 + 6;
-      dummy.position.set(x, ground(x, z) + 2.65, z);
-      dummy.rotation.set(-Math.PI / 2, 0, 0);
-      dummy.scale.setScalar(1);
-      dummy.updateMatrix();
-      this.coverageMesh.setMatrixAt(i++, dummy.matrix);
+      const tile = this.coverageTiles.get(n);
+      if (tile) {
+        (positions.array as Float32Array).set(tile, i);
+        i += tile.length;
+      }
+      const lineTile = this.coverageLineTiles.get(n);
+      if (lineTile) {
+        (linePositions.array as Float32Array).set(lineTile, li);
+        li += lineTile.length;
+      }
     });
-    this.coverageMesh.count = i;
-    this.coverageMesh.instanceMatrix.needsUpdate = true;
+    this.coverageMesh.geometry.setDrawRange(0, i / 3);
+    positions.needsUpdate = true;
+    this.coverageLineMesh.geometry.setDrawRange(0, li / 3);
+    linePositions.needsUpdate = true;
   }
   updateParticles(dt: number) {
     const wind = this.sim.windVector;
-    if (this.sim.spraying) {
+    if (this.sim.spraying && !this.sim.isSkywriting) {
       this.particleEmission += dt * 440;
       const emitted = Math.floor(this.particleEmission);
       this.particleEmission -= emitted;
+      const emitWidth = Math.min(
+        this.sim.swath * 0.45,
+        18 + (this.sim.career.upgrades?.boom ?? 0) * 8,
+      );
       for (let p = 0; p < emitted; p++) {
         const i = this.particleIndex++ % 700;
-        const side = (rng() - 0.5) * 18;
+        const side = (rng() - 0.5) * emitWidth;
         const v = this.particleVector
           .set(side, -0.8, 1.2)
           .applyMatrix4(this.plane.matrixWorld);
@@ -1357,9 +1526,18 @@ export class World {
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();
     this.renderer.setSize(w, h);
+    this.cinematicCamera?.resize(w, h);
+  }
+  get flightWeather() {
+    return (
+      (this.guidanceAvailable &&
+      (this.sim.job.challenge || this.sim.isSkywriting)
+        ? this.sim.weather
+        : (this.countyForecast ?? this.sim.weather)) ?? LESSON_WEATHER
+    );
   }
   updateWeather(dt: number) {
-    const forecast = this.countyForecast ?? this.sim.weather ?? LESSON_WEATHER;
+    const forecast = this.flightWeather;
     const blend = 1 - Math.exp(-dt * 0.6);
     this.weatherCover.value +=
       (forecast.cloud - this.weatherCover.value) * blend;
@@ -1376,16 +1554,15 @@ export class World {
           ? '#d6d2b2'
           : forecast.cloud > 0.7
             ? '#abbfc5'
-            : '#c4d8ca',
+            : '#bdd6e0',
       ),
       blend,
     );
+    this.cloudSystem?.updateWeather(forecast, dt, this.time);
     this.cloudMaterial?.color.lerp(
       this.weatherColor.set(forecast.cloud > 0.7 ? '#a6b5bb' : '#f5f1df'),
       blend,
     );
-    if (this.cloudMesh)
-      this.cloudMesh.count = Math.round(170 + this.weatherCover.value * 310);
     this.scene.environmentIntensity = 0.38 - this.weatherCover.value * 0.16;
     this.rainLevel += (forecast.rain - this.rainLevel) * blend;
     this.rain.visible = this.rainLevel > 0.01;
@@ -1419,10 +1596,14 @@ export class World {
     this.sim.step(dt, this.input);
     this.updatePlane();
     this.updateCropDetail();
+    this.treeSystem?.update(dt, this.time);
     this.ruralLife.update(this.time, this.sim.x, this.sim.z, this.sim.altitude);
+    this.hazards.update(this.sim, this.guidanceAvailable);
+    this.stuntProps?.animateScenery(dt);
     this.updateMarker();
     this.updateCoverage();
     this.updateGuides();
+    this.updateCollectibles(dt);
     this.prop.rotation.z += dt * 70;
     const preview = this.sim.phase === 'ready';
     const offset =
@@ -1434,7 +1615,31 @@ export class World {
     offset.applyAxisAngle(Y, -this.sim.heading);
     const desired = this.plane.position.clone().add(offset);
     const smoothing = preview ? 0.7 : 3.0;
-    this.camera.position.lerp(desired, 1 - Math.exp(-dt * smoothing));
+    const teleported =
+      this.skyRevealWasActive ||
+      this.lastCameraPlane.distanceTo(this.plane.position) > 80;
+    if (teleported) this.camera.position.copy(desired);
+    else this.camera.position.lerp(desired, 1 - Math.exp(-dt * smoothing));
+    this.lastCameraPlane.copy(this.plane.position);
+    // Bring the chase camera forward when scenery lies between it and the plane.
+    if (this.cameraMode === 0 && !preview) {
+      const from = this.plane.position.clone().add(new T.Vector3(0, 2, 0));
+      const delta = this.camera.position.clone().sub(from);
+      for (let t = 0.1; t <= 1; t += 0.05) {
+        const point = from.clone().addScaledVector(delta, t);
+        const blocked = this.sim.stunts.obstacles.some(
+          (o) =>
+            this.sim.stunts.calculateClearance(point.x, point.y, point.z, o) <
+            2,
+        );
+        if (blocked) {
+          this.camera.position
+            .copy(from)
+            .addScaledVector(delta, Math.max(0.08, t - 0.08));
+          break;
+        }
+      }
+    }
     const look = new T.Vector3(
       Math.sin(this.sim.heading) * 50,
       this.cameraMode === 1 ? 2 : -5,
@@ -1442,35 +1647,291 @@ export class World {
     ).add(this.plane.position);
     if (preview)
       look.copy(this.plane.position).add(new T.Vector3(-70, -12, -80));
+    this.camera.up.set(0, 1, 0);
     this.camera.lookAt(look);
+    const skyReveal = this.sim.isSkywriting && this.sim.phase === 'complete';
+    if (skyReveal) {
+      const {
+        eye,
+        look: audienceLook,
+        fov,
+      } = skyAudienceView(this.sim.job, this.camera.aspect);
+      this.camera.position.set(eye.x, eye.y, eye.z);
+      this.camera.up.set(0, 0, -1);
+      this.camera.lookAt(audienceLook.x, audienceLook.y, audienceLook.z);
+      this.camera.fov = fov;
+      this.camera.updateProjectionMatrix();
+    } else if (this.skyRevealWasActive) {
+      this.camera.fov = this.cinematicCamera?.baseFov ?? 50;
+      this.camera.updateProjectionMatrix();
+    }
+    this.cloudGroup.visible = !skyReveal;
+    this.skyRevealWasActive = skyReveal;
+    if (
+      this.cameraMode === 0 &&
+      !preview &&
+      !this.reducedMotion &&
+      !skyReveal
+    ) {
+      this.camera.rotateZ(-this.sim.roll * 0.2);
+    }
+    if (!this.reducedMotion && !skyReveal && this.cameraImpulse > 0.001) {
+      const shakeX =
+        (Math.sin(this.time * 48) * 0.35 + (Math.random() - 0.5) * 0.15) *
+        this.cameraImpulse;
+      const shakeY =
+        (Math.cos(this.time * 54) * 0.35 + (Math.random() - 0.5) * 0.15) *
+        this.cameraImpulse;
+      this.camera.position.x += shakeX;
+      this.camera.position.y += shakeY;
+      this.cameraImpulse = Math.max(0, this.cameraImpulse - dt * 2.8);
+    }
     this.updateWeather(dt);
     this.sky?.position.copy(this.camera.position);
     this.plane.visible = this.cameraMode !== 1;
     this.sun.position.copy(this.plane.position).add(SUN_OFFSET);
     this.sun.target.position.copy(this.plane.position);
-    const cloudWind = windVector(
-      this.countyForecast ?? this.sim.weather ?? LESSON_WEATHER,
-      this.time,
-    );
+    const cloudWind = windVector(this.flightWeather, this.time);
     this.cloudGroup.position.x += cloudWind.x * dt * 0.5;
     this.cloudGroup.position.z += cloudWind.z * dt * 0.5;
+    this.windVectorUniform.value.set(cloudWind.x, cloudWind.z);
+    this.cloudSystem?.update(dt, this.time, cloudWind, this.camera, this.sun);
     this.plane.updateMatrixWorld();
     this.updateParticles(dt);
-    for (const { mesh, target } of this.otherPilots.values()) {
-      mesh.position.lerp(
-        new T.Vector3(target.x, target.y, target.z),
-        1 - Math.exp(-dt * 8),
-      );
-      mesh.rotation.order = 'YXZ';
-      mesh.rotation.set(target.pitch, -target.heading, target.roll);
-      const remoteProp = mesh.getObjectByName('propeller');
-      if (remoteProp) remoteProp.rotation.z += dt * 70;
+    this.aircraftFx?.update(dt, this.sim, this.time);
+    this.arcadeFx?.update(dt, this.sim, this.time);
+    this.skywriting.update(
+      this.sim,
+      this.time,
+      this.guidesEnabled && this.guidanceAvailable,
+      this.renderer.domElement.height /
+        (2 * Math.tan((this.camera.fov * Math.PI) / 360)),
+    );
+    this.sunRays?.update(
+      dt,
+      this.time,
+      this.weatherCover.value,
+      this.sim.y,
+      this.sun.position,
+    );
+    const skyEvents =
+      this.skyLife?.update(
+        dt,
+        this.time,
+        this.flightWeather,
+        this.sim,
+      ) ?? [];
+    for (const ev of skyEvents) {
+      if (ev.type === 'balloon_flyby') {
+        this.sim.career.cash += ev.bonus;
+        this.sim.message = ev.message;
+        this.arcadeFx?.addFloatingBadge(ev.message, '#f59e0b', ev.pos);
+      }
     }
-    this.renderer.render(this.scene, this.camera);
+    let nearestRemoteDist = Infinity;
+    let nearestRemoteRelSpeed = 0;
+    let nearestRemotePan = 0;
+    const nowSec = this.time;
+
+    for (const remote of this.otherPilots.values()) {
+      remote.mesh.position.lerp(remote.targetPos, 1 - Math.exp(-dt * 8));
+      remote.mesh.quaternion.slerp(remote.targetQuat, 1 - Math.exp(-dt * 9));
+      const remoteProp = remote.mesh.getObjectByName('propeller');
+      if (remoteProp)
+        remoteProp.rotation.z += dt * (remote.target.speed * 1.8 + 45);
+
+      const dx = remote.mesh.position.x - this.plane.position.x;
+      const dy = remote.mesh.position.y - this.plane.position.y;
+      const dz = remote.mesh.position.z - this.plane.position.z;
+      const dist = Math.hypot(dx, dy, dz);
+
+      const isRival =
+        Boolean(this.rivalPilotId && remote.target.id === this.rivalPilotId) ||
+        remote.target.callsign === this.rivalCallsign;
+
+      // Mid-Air Formation / Dogfight Near-Miss Stunt Check (clearance < 14m at speed >= 28 m/s)
+      if (dist < 14.0 && this.sim.speed >= 28.0) {
+        if (!remote.lastNearMissTime || nowSec - remote.lastNearMissTime > 15.0) {
+          remote.lastNearMissTime = nowSec;
+          const bonus = isRival ? 150 : 75;
+          const label = isRival ? '★ RIVAL BUZZ! +$150' : '★ FORMATION BUZZ! +$75';
+          this.sim.career.cash += bonus;
+          this.sim.message = label;
+          this.arcadeFx?.addFloatingBadge(
+            label,
+            isRival ? '#f59e0b' : '#38bdf8',
+            remote.mesh.position,
+          );
+          this.cameraImpulse = 0.08;
+        }
+      }
+
+      if (dist < nearestRemoteDist) {
+        nearestRemoteDist = dist;
+
+        // Line-of-sight unit vector from player to remote
+        const losX = dist > 0.1 ? dx / dist : 0;
+        const losY = dist > 0.1 ? dy / dist : 0;
+        const losZ = dist > 0.1 ? dz / dist : 0;
+
+        // 3D vector velocity of player and remote
+        const pVx = Math.sin(this.sim.heading) * Math.cos(this.sim.pitch) * this.sim.speed;
+        const pVy = Math.sin(this.sim.pitch) * this.sim.speed;
+        const pVz = -Math.cos(this.sim.heading) * Math.cos(this.sim.pitch) * this.sim.speed;
+
+        const rVx = Math.sin(remote.target.heading) * Math.cos(remote.target.pitch) * remote.target.speed;
+        const rVy = Math.sin(remote.target.pitch) * remote.target.speed;
+        const rVz = -Math.cos(remote.target.heading) * Math.cos(remote.target.pitch) * remote.target.speed;
+
+        // Relative velocity: vRemote - vPlayer
+        const dvx = rVx - pVx;
+        const dvy = rVy - pVy;
+        const dvz = rVz - pVz;
+
+        // Closing speed is the rate of distance decrease: -(v_rel . LOS)
+        nearestRemoteRelSpeed = -(dvx * losX + dvy * losY + dvz * losZ);
+
+        // 3D cockpit-relative stereo panning (works in pitch, roll, and inverted flight)
+        const localPos = this.plane.worldToLocal(remote.mesh.position.clone());
+        nearestRemotePan = Math.max(-0.9, Math.min(0.9, localPos.x / 35));
+      }
+
+      if (remote.labelSprite) {
+        const opacity = Math.max(0, Math.min(0.9, 1 - (dist - 100) / 750));
+        remote.labelSprite.material.opacity = opacity;
+        remote.labelSprite.visible = opacity > 0.02;
+
+        const distMeters = Math.round(dist);
+        const quantDist =
+          dist < 30
+            ? Math.floor(dist)
+            : dist < 100
+              ? Math.floor(dist / 5) * 5
+              : Math.floor(dist / 25) * 25;
+        const labelKey = `${remote.target.callsign}:${isRival}:${remote.target.spraying}:${quantDist}`;
+        if (
+          remote.labelCanvas &&
+          remote.lastLabelKey !== labelKey &&
+          (remote.lastDistanceUpdate === undefined ||
+            nowSec - remote.lastDistanceUpdate > 0.4)
+        ) {
+          remote.lastLabelKey = labelKey;
+          remote.lastDistanceUpdate = nowSec;
+          this.drawPilotLabel(
+            remote.labelCanvas,
+            remote.target.callsign,
+            isRival,
+            remote.target.spraying,
+            distMeters,
+          );
+          if (remote.labelSprite.material.map) {
+            remote.labelSprite.material.map.needsUpdate = true;
+          }
+        }
+      }
+
+      if (remote.sprayPoints && remote.sprayPositions && remote.sprayLife) {
+        const count = remote.sprayLife.length;
+        const emitCount = remote.target.spraying && !remote.target.skywriting
+          ? Math.min(2, Math.floor(dt * 60) || 1)
+          : 0;
+        for (let p = 0; p < emitCount; p++) {
+          const idx = (remote.sprayIndex ?? 0) % count;
+          remote.sprayIndex = idx + 1;
+          const spread = (Math.random() - 0.5) * 14;
+          const emitPos = new T.Vector3(spread, -0.8, 1.2).applyMatrix4(
+            remote.mesh.matrixWorld,
+          );
+          remote.sprayPositions[idx * 3] = emitPos.x;
+          remote.sprayPositions[idx * 3 + 1] = emitPos.y;
+          remote.sprayPositions[idx * 3 + 2] = emitPos.z;
+          remote.sprayLife[idx] = 2.0 + Math.random() * 0.5;
+        }
+
+        let hasActiveParticles = false;
+        for (let p = 0; p < count; p++) {
+          if (remote.sprayLife[p] > 0) {
+            hasActiveParticles = true;
+            remote.sprayLife[p] -= dt;
+            remote.sprayPositions[p * 3] += cloudWind.x * dt * 0.6;
+            remote.sprayPositions[p * 3 + 1] -= dt * 4.5;
+            remote.sprayPositions[p * 3 + 2] += cloudWind.z * dt * 0.6;
+          } else {
+            remote.sprayPositions[p * 3 + 1] = -1000;
+          }
+        }
+        if (hasActiveParticles || emitCount > 0) {
+          remote.sprayPoints.geometry.attributes.position.needsUpdate = true;
+        }
+      }
+    }
+
+    if (Number.isFinite(nearestRemoteDist)) {
+      this.onRemoteProximity?.(
+        nearestRemoteDist,
+        nearestRemoteRelSpeed,
+        nearestRemotePan,
+      );
+    } else {
+      this.onRemoteProximity?.(999, 0, 0);
+    }
+
+    if (this.cinematicCamera) {
+      this.cinematicCamera.reducedMotion = this.reducedMotion;
+      this.cinematicCamera.render(dt, this.sim, this.time);
+    } else {
+      this.renderer.render(this.scene, this.camera);
+    }
     this.onFrame?.();
     this.frame = requestAnimationFrame(this.animate);
   };
+  drawPilotLabel(
+    canvas: HTMLCanvasElement,
+    callsign: string,
+    isRival: boolean,
+    spraying: boolean,
+    distMeters?: number,
+  ) {
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    const w = canvas.width;
+    const h = canvas.height;
+    ctx.clearRect(0, 0, w, h);
+
+    const radius = 16;
+    ctx.beginPath();
+    ctx.roundRect(4, 4, w - 8, h - 8, radius);
+    ctx.fillStyle = isRival
+      ? 'rgba(40, 24, 8, 0.90)'
+      : 'rgba(12, 38, 28, 0.88)';
+    ctx.fill();
+    ctx.strokeStyle = isRival ? '#f59e0b' : spraying ? '#84cc16' : '#6ee7b7';
+    ctx.lineWidth = 3.5;
+    ctx.stroke();
+
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.font =
+      'bold 24px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
+    ctx.fillStyle = isRival ? '#fef3c7' : '#f0fdf4';
+
+    let text = isRival ? `★ RIVAL · ${callsign}` : callsign;
+    if (distMeters !== undefined && distMeters > 0) {
+      text += ` · ${distMeters < 1000 ? `${distMeters}m` : `${(distMeters / 1000).toFixed(1)}km`}`;
+    }
+    ctx.fillText(text, w / 2, h / 2 - (spraying ? 8 : 0));
+
+    if (spraying) {
+      ctx.font = 'bold 15px sans-serif';
+      ctx.fillStyle = '#a3e635';
+      ctx.fillText('● SPRAYING', w / 2, h / 2 + 18);
+    }
+  }
   setCounty(county: CountySnapshot | null) {
+    this.skywriting.receive(
+      county ? county.pilots.filter((p) => p.id !== county.viewerId) : null,
+      this.time,
+    );
     this.countyForecast = county?.weather ?? null;
     this.guidanceAvailable = !county || Boolean(county.player?.activeJob);
     const live =
@@ -1480,12 +1941,17 @@ export class World {
     for (const [id, other] of this.otherPilots) {
       if (!live.some((p) => p.id === id)) {
         this.scene.remove(other.mesh);
+        if (other.sprayPoints) this.scene.remove(other.sprayPoints);
         other.mesh.traverse((o) => {
           if (o instanceof T.Sprite && o.name === 'pilot-label') {
             o.material.map?.dispose();
             o.material.dispose();
           }
         });
+        if (other.sprayPoints) {
+          other.sprayPoints.geometry.dispose();
+          (other.sprayPoints.material as T.Material).dispose();
+        }
         this.otherPilots.delete(id);
       }
     }
@@ -1495,31 +1961,84 @@ export class World {
         const mesh = this.plane.clone(true);
         mesh.visible = true;
         mesh.position.set(pilot.x, pilot.y, pilot.z);
-        const canvas = document.createElement('canvas');
-        canvas.width = 256;
-        canvas.height = 48;
-        const ctx = canvas.getContext('2d')!;
-        ctx.fillStyle = '#153d31cc';
-        ctx.fillRect(0, 0, 256, 48);
-        ctx.font = '20px Arial';
-        ctx.textAlign = 'center';
-        ctx.fillStyle = '#edf5c8';
-        ctx.fillText(pilot.callsign, 128, 31);
-        const label = new T.Sprite(
-          new T.SpriteMaterial({
-            map: new T.CanvasTexture(canvas),
-            transparent: true,
-            depthTest: false,
-          }),
+        mesh.quaternion.setFromEuler(
+          new T.Euler(pilot.pitch, -pilot.heading, pilot.roll, 'YXZ'),
         );
-        label.name = 'pilot-label';
-        label.position.set(0, 6, 0);
-        label.scale.set(20, 3.75, 1);
-        mesh.add(label);
-        other = { mesh, target: pilot };
+
+        // Remote spray particle system (240 particles, ~2.0s trail)
+        const sprayPositions = new Float32Array(240 * 3);
+        const sprayLife = new Float32Array(240);
+        for (let i = 0; i < 240; i++) {
+          sprayPositions[i * 3 + 1] = -1000;
+        }
+        const sprayGeom = new T.BufferGeometry();
+        sprayGeom.setAttribute(
+          'position',
+          new T.BufferAttribute(sprayPositions, 3).setUsage(T.DynamicDrawUsage),
+        );
+        const sprayMat = new T.PointsMaterial({
+          color: '#e4fcd6',
+          size: 3.2,
+          transparent: true,
+          opacity: 0.38,
+          depthWrite: false,
+        });
+        const sprayPoints = new T.Points(sprayGeom, sprayMat);
+        sprayPoints.frustumCulled = false;
+        this.scene.add(sprayPoints);
+
+        const targetPos = new T.Vector3(pilot.x, pilot.y, pilot.z);
+        const targetQuat = new T.Quaternion().setFromEuler(
+          new T.Euler(pilot.pitch, -pilot.heading, pilot.roll, 'YXZ'),
+        );
+
+        let labelCanvas: HTMLCanvasElement | undefined;
+        let labelSprite: T.Sprite | undefined;
+        if (typeof document !== 'undefined') {
+          labelCanvas = document.createElement('canvas');
+          labelCanvas.width = 384;
+          labelCanvas.height = 72;
+          this.drawPilotLabel(
+            labelCanvas,
+            pilot.callsign,
+            pilot.callsign === this.rivalCallsign,
+            pilot.spraying,
+          );
+          labelSprite = new T.Sprite(
+            new T.SpriteMaterial({
+              map: new T.CanvasTexture(labelCanvas),
+              transparent: true,
+              depthTest: false,
+            }),
+          );
+          labelSprite.name = 'pilot-label';
+          labelSprite.position.set(0, 6, 0);
+          labelSprite.scale.set(22, 4.125, 1);
+          mesh.add(labelSprite);
+        }
+
+        other = {
+          mesh,
+          target: pilot,
+          targetPos,
+          targetQuat,
+          labelSprite,
+          labelCanvas,
+          lastLabelKey: `${pilot.callsign}:${pilot.callsign === this.rivalCallsign}:${pilot.spraying}`,
+          sprayPoints,
+          sprayPositions,
+          sprayLife,
+          sprayIndex: 0,
+        };
         this.otherPilots.set(pilot.id, other);
         this.scene.add(mesh);
-      } else other.target = pilot;
+      } else {
+        other.target = pilot;
+        other.targetPos.set(pilot.x, pilot.y, pilot.z);
+        other.targetQuat.setFromEuler(
+          new T.Euler(pilot.pitch, -pilot.heading, pilot.roll, 'YXZ'),
+        );
+      }
     }
     const phase = county?.season.phaseIndex ?? -1;
     if (phase !== this.seasonalPhase) {
@@ -1550,7 +2069,11 @@ export class World {
       }
     }
   }
+  triggerCameraImpulse(strength: number = 0.6): void {
+    this.cameraImpulse = Math.min(1.2, this.cameraImpulse + strength);
+  }
   dispose() {
+    this.skywriting?.dispose();
     this.disposed = true;
     cancelAnimationFrame(this.frame);
     this.resizeObserver.disconnect();
@@ -1579,6 +2102,15 @@ export class World {
     });
     textures.forEach((texture) => texture.dispose());
     this.environmentTarget?.dispose();
+    this.sunRays?.dispose();
+    this.skyLife?.dispose();
+    this.cloudSystem?.dispose();
+    this.treeSystem?.dispose();
+    this.aircraftFx?.dispose();
+    this.arcadeFx?.dispose();
+    this.cinematicCamera?.dispose();
+    this.stuntProps?.dispose();
+    this.stuntGroup.clear();
     this.sun.shadow.dispose();
     this.renderer.dispose();
     this.renderer.domElement.remove();

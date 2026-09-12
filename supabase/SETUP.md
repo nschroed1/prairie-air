@@ -6,7 +6,7 @@ Project: `jyclvsljxzszxjhpmsab` at `https://jyclvsljxzszxjhpmsab.supabase.co`.
 
 - Game: https://playprairieair.com (the original Workers address remains available).
 - Worker: `prairie-air` in the owner's Cloudflare account.
-- Deployment version: `45e19d5d-aa4b-40c8-ac0c-c478d878cb5a`.
+- Deployment version: `1414fc68-8b53-4a03-af17-1ba53924fff7`.
 - `COUNTY_STORAGE=supabase` is active. The Worker has no D1 binding.
 - Both supplied keys were verified without printing them. They are stored in Cloudflare Worker secrets and ignored local `.dev.vars` (mode 0600). The server secret is absent from compiled code, browser assets, and the deployment configuration. `/api/auth/config` intentionally returns only the project URL and publishable key.
 - Email/password sign-in and email confirmation are enabled. The project uses ES256 signing keys.

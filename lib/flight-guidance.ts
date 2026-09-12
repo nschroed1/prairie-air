@@ -1,4 +1,10 @@
 import { fieldSize, ground, insideField, type Simulation } from './simulation';
+import {
+  fieldCells,
+  passExtent,
+  clipField,
+  polygonArea,
+} from './field-geometry';
 
 export type PassGuide = {
   x: number;
@@ -6,6 +12,8 @@ export type PassGuide = {
   index: number;
   total: number;
   coverage: number;
+  minZ: number;
+  maxZ: number;
 };
 const passCache = new WeakMap<
   Simulation,
@@ -28,20 +36,28 @@ export function flightPasses(sim: Simulation): PassGuide[] {
     index,
     total: count,
     coverage: 0,
+    minZ: sim.job.z - depth / 2,
+    maxZ: sim.job.z + depth / 2,
   }));
+  for (const pass of passes) {
+    const extent = passExtent(sim.job, pass.x - sim.job.x);
+    if (extent) {
+      pass.minZ = sim.job.z + extent.min;
+      pass.maxZ = sim.job.z + extent.max;
+    }
+  }
   const cells = Array.from({ length: count }, () => 0);
+  const validCells = fieldCells(sim.job);
   for (let row = 0; row < 38; row++)
     for (let col = 0; col < 38; col++) {
       const x = sim.job.x - 228 + col * 12 + 6;
-      const z = sim.job.z - 228 + row * 12 + 6;
-      if (
-        Math.abs(x - sim.job.x) >= width / 2 ||
-        Math.abs(z - sim.job.z) >= depth / 2
-      )
-        continue;
-      const index = Math.min(
-        count - 1,
-        Math.floor((x - sim.job.x + width / 2) / (width / count)),
+      if (!validCells.has(row * 38 + col)) continue;
+      const index = Math.max(
+        0,
+        Math.min(
+          count - 1,
+          Math.floor((x - sim.job.x + width / 2) / (width / count)),
+        ),
       );
       cells[index]++;
       if (sim.covered.has(row * 38 + col)) passes[index].coverage++;
@@ -63,10 +79,9 @@ export function nextPass(sim: Simulation): PassGuide {
 
 export function lineUpLesson(sim: Simulation) {
   if (sim.job.id !== 0 || sim.phase !== 'flying') return false;
-  const pass = nextPass(sim),
-    { depth } = fieldSize(sim.job);
+  const pass = nextPass(sim);
   sim.x = pass.x;
-  sim.z = sim.job.z + (pass.heading === 0 ? 1 : -1) * (depth / 2 + 70);
+  sim.z = pass.heading === 0 ? pass.maxZ + 70 : pass.minZ - 70;
   sim.y = ground(sim.x, sim.z) + 19;
   sim.x -= sim.sprayDrift;
   sim.y = ground(sim.x, sim.z) + 19;
@@ -98,16 +113,63 @@ export function sprayFootprint(sim: Simulation, ahead = 0) {
 }
 
 export function spraySafety(sim: Simulation): 'outside' | 'edge' | 'safe' {
-  if (!sprayFootprint(sim).every((p) => insideField(sim.job, p.x, p.z)))
-    return 'outside';
-  return sprayFootprint(sim, 0.5).every((p) => insideField(sim.job, p.x, p.z))
-    ? 'safe'
-    : 'edge';
+  const safe = (ahead: number) => {
+    const footprint = sprayFootprint(sim, ahead);
+    if (!footprint.every((p) => insideField(sim.job, p.x, p.z))) return false;
+    const local = footprint.map((p) => ({
+      x: p.x - sim.job.x,
+      z: p.z - sim.job.z,
+    }));
+    return !(sim.job.noSprayZones ?? []).some(
+      (zone) =>
+        polygonArea(
+          clipField(
+            local,
+            zone.x - zone.width / 2,
+            zone.z - zone.depth / 2,
+            zone.x + zone.width / 2,
+            zone.z + zone.depth / 2,
+          ),
+        ) > 1e-6,
+    );
+  };
+  if (!safe(0)) return 'outside';
+  return safe(0.5) ? 'safe' : 'edge';
+}
+
+// Recovery depends on the approach geometry, not on having sprayed first.
+export function approachRecovery(sim: Simulation) {
+  const pass = nextPass(sim),
+    { width } = fieldSize(sim.job);
+  const x = pass.x - sim.sprayDrift;
+  const z =
+    (pass.heading === 0 ? pass.maxZ + 70 : pass.minZ - 70) - sim.sprayDriftZ;
+  const dx = x - sim.x,
+    dz = z - sim.z;
+  const bearing = ((Math.atan2(dx, -dz) * 180) / Math.PI + 360) % 360;
+  const relative =
+    ((((bearing - (sim.heading * 180) / Math.PI + 540) % 360) + 360) % 360) -
+    180;
+  const fieldAhead =
+    (sim.job.x - sim.x) * Math.sin(sim.heading) -
+    (sim.job.z - sim.z) * Math.cos(sim.heading);
+  const needed =
+    spraySafety(sim) === 'outside' &&
+    (fieldAhead < -sim.speed * 0.5 ||
+      Math.abs(sim.x - x) > Math.max(sim.swath, width / 2));
+  return { needed, bearing, relative, distance: Math.hypot(dx, dz) };
 }
 
 export function coachMessage(sim: Simulation) {
   const pass = nextPass(sim);
   const safety = spraySafety(sim);
+  const recovery = approachRecovery(sim);
+  if (sim.job.challenge && sim.warning.danger)
+    return {
+      title: sim.warning.text.split(' · ')[0],
+      detail: sim.warning.text.split(' · ').slice(1).join(' · '),
+      step: 2,
+    };
   if (sim.coverage >= sim.job.bonusTarget)
     return {
       title: 'Precision bonus earned',
@@ -119,6 +181,13 @@ export function coachMessage(sim: Simulation) {
       title: 'Your contract is ready to collect',
       detail: `Bank your pay now, or aim for ${sim.job.bonusTarget}% coverage to earn the bonus.`,
       step: 3,
+    };
+  if (recovery.needed)
+    return {
+      title: 'Return to your approach',
+      detail: `Spray off. ${Math.abs(recovery.relative) < 15 ? 'Fly ahead' : recovery.relative > 0 ? 'Bank right' : 'Bank left'} toward strip ${pass.index + 1}, then level out on the white line.`,
+      step: 2,
+      recovery,
     };
   if (!sim.validSpray)
     return {
@@ -196,6 +265,8 @@ export function isPersonalBest(current: PracticeBest, previous?: PracticeBest) {
 }
 
 export function debriefTip(sim: Simulation) {
+  if (sim.result.repairs > 0)
+    return 'Repair bills come out before upgrades. Bank around birds, climb over marked yards, and leave tornadoes at least 220 m of room.';
   if (sim.result.penalty > 0)
     return 'Release the spray while the footprint is amber. A wider turn gives you time to line up without spraying outside the flags.';
   if (!sim.result.bonus)

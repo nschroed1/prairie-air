@@ -1,0 +1,135 @@
+.welcome-audio {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin-top: 17px;
+  padding: 8px 0;
+  border: 0;
+  background: transparent;
+  color: #eff4d9;
+  font-size: 12px;
+  text-align: left;
+}
+.welcome-audio > span {
+  border-left: 1px solid #e0eed350;
+  padding-left: 9px;
+  color: #d5e4d4;
+  font-size: 10px;
+}
+.welcome-audio.is-playing > svg {
+  color: #e1f496;
+}
+.sound-controls {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 3px;
+}
+.state-card > .sound-controls {
+  justify-content: flex-end;
+  margin-top: 15px;
+}
+.state-card .sound-controls > button {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border: 0;
+  border-radius: 6px;
+  background: #ffffff10;
+  color: #dce8d9;
+}
+.state-card .sound-settings-card p {
+  margin: 5px 0 17px;
+  font-size: 11px;
+}
+.sound-settings > summary {
+  list-style: none;
+  display: grid;
+  place-items: center;
+  width: 29px;
+  height: 36px;
+  border-radius: 6px;
+  cursor: pointer;
+  color: #dce8d9;
+}
+.sound-settings > summary::-webkit-details-marker {
+  display: none;
+}
+.sound-settings > summary:hover,
+.sound-settings[open] > summary {
+  background: #ffffff20;
+}
+.sound-settings > summary:focus-visible {
+  outline: 2px solid #e3f1b5;
+  outline-offset: 3px;
+}
+.sound-settings-card {
+  position: absolute;
+  z-index: 40;
+  right: 0;
+  bottom: 49px;
+  width: min(260px, calc(100vw - 32px));
+  padding: 19px;
+  border: 1px solid #dce6c942;
+  border-radius: 15px;
+  background: #15352cf5;
+  box-shadow: 0 14px 50px #051e2980;
+  backdrop-filter: blur(18px);
+  color: #f3f5df;
+  text-align: left;
+}
+.sound-settings-card > strong {
+  font-size: 16px;
+}
+.sound-settings-card p {
+  font-size: 11px;
+  color: #bfcebd;
+  margin: 5px 0 17px;
+}
+.sound-settings-card label {
+  display: block;
+  margin: 13px 0;
+  font-size: 12px;
+}
+.sound-settings-card label > span {
+  display: flex;
+  justify-content: space-between;
+}
+.sound-settings-card output {
+  color: #e1f496;
+  font-variant-numeric: tabular-nums;
+}
+.sound-settings-card input {
+  display: block;
+  width: 100%;
+  accent-color: #d4e99d;
+  margin: 10px 0;
+  cursor: pointer;
+}
+.sound-settings-card small {
+  display: block;
+  color: #bfcebd;
+  font-size: 10px;
+  line-height: 1.6;
+}
+.audio-error {
+  position: absolute;
+  right: 0;
+  bottom: 54px;
+  width: 260px;
+  padding: 12px;
+  border-radius: 10px;
+  background: #3f3020;
+  color: #fff3d9;
+  font-size: 12px;
+}
+.sound-controls:has(.sound-settings[open]) .audio-error {
+  bottom: 295px;
+}
+@media (max-height: 760px), (max-width: 680px) {
+  .welcome-audio {
+    margin-top: 9px;
+    padding: 4px 0;
+  }
+}

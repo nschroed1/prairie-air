@@ -158,7 +158,17 @@ export class CountyClient {
         error?: string;
       };
       if (this.disposed || generation !== this.flightGeneration) return false;
-      if (!response.ok) throw new Error(data.error || 'Flight update failed.');
+      if (!response.ok) {
+        if (response.status === 409 && action === 'claim') {
+          this.notify(
+            data.error ||
+              'Another pilot claimed that field. Choose an open contract.',
+          );
+          void this.poll();
+          return false;
+        }
+        throw new Error(data.error || 'Flight update failed.');
+      }
       this.snapshot =
         data.compact && this.snapshot
           ? {

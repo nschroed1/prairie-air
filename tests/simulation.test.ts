@@ -23,12 +23,21 @@ const fullField = {
   bonus: 450,
 };
 
-void test('starting each contract places aircraft at safe spraying altitude by the correct crop', () => {
+void test('starting each contract clears farm approaches by the correct crop', () => {
   const sim = new Simulation();
   for (const job of contracts) {
     sim.reset(job);
     assert.equal(sim.phase, 'flying');
-    assert.ok(Math.abs(sim.altitude - 19) < 1e-9);
+    assert.ok(sim.altitude >= 19 - 1e-9 && sim.altitude < 65);
+    if (job.id === 0)
+      assert.ok(
+        Math.abs(sim.altitude - 19) < 1e-9,
+        'The first lesson keeps its gentle spray-height approach',
+      );
+    for (const obstacle of sim.stunts.obstacles)
+      assert.ok(
+        sim.stunts.calculateClearance(sim.x, sim.y, sim.z, obstacle) > 8,
+      );
     assert.equal(sim.coverage, 0);
     assert.equal(
       fields.find((f) => f.x === job.x && f.z === job.z)?.crop,
@@ -76,15 +85,15 @@ void test('payment requires the target and is claimed only once; precision gets 
   assert.equal(sim.finish(), false);
   for (let i = 0; i < 1156; i++) sim.covered.add(i);
   assert.equal(sim.finish(), true);
-  assert.equal(sim.career.cash, 1200);
+  assert.equal(sim.career.cash, 1450);
   assert.equal(sim.result.bonus, 0);
   assert.equal(sim.finish(), false);
-  assert.equal(sim.career.cash, 1200);
+  assert.equal(sim.career.cash, 1450);
   sim.reset(fullField);
   for (let i = 0; i < 1444; i++) sim.covered.add(i);
   assert.equal(sim.finish(), true);
   assert.equal(sim.result.bonus, 450);
-  assert.equal(sim.career.cash, 2850);
+  assert.equal(sim.career.cash, 3350);
   assert.deepEqual(sim.career.completed, [0]);
 });
 void test('upgrades enforce price and max level, and refill preserves progress', () => {
@@ -233,18 +242,18 @@ void test('overspray is deducted once from earned pay and bonus, with no negativ
   assert.equal(sim.finish(), true);
   assert.equal(sim.result.bonus, 450);
   assert.equal(sim.result.penalty, 2.5 * OVERSPRAY_PENALTY_PER_ACRE);
-  assert.equal(sim.result.total, 1550);
-  assert.equal(sim.career.cash, 1550);
-  assert.equal(sim.career.totalEarned, 1550);
+  assert.equal(sim.result.total, 1650);
+  assert.equal(sim.career.cash, 1650);
+  assert.equal(sim.career.totalEarned, 1650);
   assert.equal(sim.finish(), false);
-  assert.equal(sim.career.cash, 1550);
+  assert.equal(sim.career.cash, 1650);
   sim.reset(fullField);
   for (let i = 0; i < 1444; i++) sim.covered.add(i);
   sim.oversprayAcres = 10000;
   sim.finish();
-  assert.equal(sim.result.penalty, 1650);
+  assert.equal(sim.result.penalty, 1750);
   assert.equal(sim.result.total, 0);
-  assert.equal(sim.career.cash, 1550);
+  assert.equal(sim.career.cash, 1650);
 });
 
 void test('older saved flights and completion receipts load without retroactive penalties', () => {

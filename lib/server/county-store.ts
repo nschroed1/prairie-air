@@ -217,16 +217,21 @@ export class D1CountyStore implements CountyStore {
           ),
       );
     } else if (active !== null) {
-      // Only new coverage renews a reservation; circling or idling cannot hold it forever.
+      const isRefill = command.action === 'refill';
+      const renewedLease = now + LEASE_MS;
+      const refillGrace = Math.max(claim?.lease_until ?? 0, now + 60000);
+      // Only new coverage renews a full reservation; refill grants a 60s buffer to return to the field.
       writes.push(
         this.db
           .prepare(
-            `UPDATE field_claims SET coverage=?,lease_until=CASE WHEN ? THEN ? ELSE lease_until END WHERE id=? AND owner=? AND completed_at IS NULL AND ${winner}`,
+            `UPDATE field_claims SET coverage=?,lease_until=CASE WHEN ? THEN ? WHEN ? THEN ? ELSE lease_until END WHERE id=? AND owner=? AND completed_at IS NULL AND ${winner}`,
           )
           .bind(
             sim.coverage,
             sim.coverage > (claim?.coverage ?? 0) ? 1 : 0,
-            now + LEASE_MS,
+            renewedLease,
+            isRefill ? 1 : 0,
+            refillGrace,
             active,
             id,
             ...winArgs,

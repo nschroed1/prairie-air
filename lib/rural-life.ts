@@ -1,18 +1,9 @@
 import * as T from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import { fields, ground, riverX } from './simulation';
+import { fields, ground, riverX, insideField } from './simulation';
 
-export const FARMSTEADS = [
-  [-315, -195],
-  [-680, 140],
-  [-370, -735],
-  [500, -720],
-  [-1200, 780],
-  [1680, 220],
-  [-1730, -700],
-  [1920, -1300],
-  [30, -1640],
-] as const;
+import { FARMSTEADS } from './landmark-data';
+export { FARMSTEADS } from './landmark-data';
 export const PADDOCKS = FARMSTEADS.map(([x, z]) => ({
   x: x + 85,
   z: z + 70,
@@ -79,7 +70,8 @@ export function ruralResidents(): RuralResident[] {
       for (let i = 0; i < herd.count; i++) {
         const x = field.x + herd.dx + (roll() - 0.5) * 70;
         const z = field.z + herd.dz + (roll() - 0.5) * 55;
-        if (!inFarmClearing(x, z)) add(herd.kind, x, z);
+        if (!inFarmClearing(x, z) && insideField(field, x, z))
+          add(herd.kind, x, z);
       }
   }
   // Farmyard pens put animals near the first low approach as well as out in pasture.
