@@ -221,10 +221,10 @@ export class World {
   nightMode = false;
   nightFactor = 0;
   nightSkyUniform = { value: 0 };
-  tailStrobeLight: T.PointLight | null = null;
+  tailStrobeMesh: T.Mesh | null = null;
+  tailStrobeMat: T.MeshBasicMaterial | null = null;
   landingLight: T.SpotLight | null = null;
-  landingBeamMesh: T.Mesh | null = null;
-  landingBeamMat: T.MeshBasicMaterial | null = null;
+  landingBulbMat: T.MeshBasicMaterial | null = null;
   aircraftNavLights: { port: T.PointLight; stbd: T.PointLight } | null = null;
   private skyRevealWasActive = false;
   constructor(
@@ -510,9 +510,10 @@ export class World {
           float sun=max(dot(d,sunDirection),0.0);
           vec3 horizon=mix(vec3(.42,.66,.82),vec3(.88,.75,.50),pow(sun,8.0)*.45);
           vec3 color=mix(horizon,vec3(.025,.22,.55),pow(height,.48));
-          color+=vec3(1.,.57,.20)*pow(sun,20.0)*.18;
-          color+=vec3(1.,.80,.48)*pow(sun,220.0)*.28;
-          color+=vec3(3.8,3.0,1.8)*smoothstep(.99955,.99985,sun);
+          float sunFade = 1.0 - nightFactor * 0.99;
+          color+=vec3(1.,.57,.20)*pow(sun,20.0)*.18*sunFade;
+          color+=vec3(1.,.80,.48)*pow(sun,220.0)*.28*sunFade;
+          color+=vec3(3.8,3.0,1.8)*smoothstep(.99955,.99985,sun)*sunFade;
           vec2 wisps=d.xz/(height+.22)*vec2(2.2,6.5);
           float cirrus=noise(wisps)+noise(wisps*2.2)*.4;
           cirrus=smoothstep(.88,1.3,cirrus)*smoothstep(.14,.5,height)*.15;
@@ -520,7 +521,7 @@ export class World {
           vec3 graySky=mix(vec3(.55,.62,.64),vec3(.30,.38,.44),pow(height,.55));
           graySky+=noise(wisps*.7)*.075;
           color=mix(color,graySky,weatherCover*.94);
-          vec3 nightSky=mix(vec3(0.04, 0.07, 0.15), vec3(0.012, 0.02, 0.05), pow(height, 0.55));
+          vec3 nightSky=mix(vec3(0.025, 0.045, 0.10), vec3(0.005, 0.009, 0.022), pow(height, 0.6));
           color=mix(color, nightSky, nightFactor);
           gl_FragColor=vec4(color,1.0);
           #include <tonemapping_fragment>
@@ -1298,43 +1299,45 @@ export class World {
     spinner.rotation.x = -Math.PI / 2;
   }
   attachAircraftNightLighting() {
-    const portLight = new T.PointLight('#ff3333', 0, 16, 1.8);
+    // Subtle wingtip navigation lights (soft local illumination, no screen flash)
+    const portLight = new T.PointLight('#ff3333', 0, 3.5, 2.0);
     portLight.position.set(-9.8, -0.16, -0.9);
     this.plane.add(portLight);
 
-    const stbdLight = new T.PointLight('#33ff55', 0, 16, 1.8);
+    const stbdLight = new T.PointLight('#33ff55', 0, 3.5, 2.0);
     stbdLight.position.set(9.8, -0.16, -0.9);
     this.plane.add(stbdLight);
 
     this.aircraftNavLights = { port: portLight, stbd: stbdLight };
 
-    this.tailStrobeLight = new T.PointLight('#ffffff', 0, 26, 1.5);
-    this.tailStrobeLight.position.set(0, 2.2, 4.2);
-    this.plane.add(this.tailStrobeLight);
+    // Tail strobe: crisp FAA-style white bulb mesh on rudder tip (zero screen-wide strobe flash!)
+    this.tailStrobeMat = new T.MeshBasicMaterial({
+      color: '#222222',
+      toneMapped: false,
+    });
+    this.tailStrobeMesh = new T.Mesh(new T.SphereGeometry(0.13, 8, 6), this.tailStrobeMat);
+    this.tailStrobeMesh.position.set(0, 2.2, 4.2);
+    this.plane.add(this.tailStrobeMesh);
 
-    this.landingLight = new T.SpotLight('#fff4d6', 0, 140, Math.PI / 7, 0.45, 1.2);
-    this.landingLight.position.set(0, -0.4, -4.5);
+    // Forward landing light: SpotLight aimed down and forward at runway/ground
+    this.landingLight = new T.SpotLight('#fff4d6', 0, 85, Math.PI / 6, 0.5, 1.4);
+    this.landingLight.position.set(0, -0.5, -4.2);
     const landingTarget = new T.Object3D();
-    landingTarget.position.set(0, -2.5, -45);
+    landingTarget.position.set(0, -6.0, -32);
     this.plane.add(landingTarget);
     this.landingLight.target = landingTarget;
     this.plane.add(this.landingLight);
 
-    const beamGeom = new T.ConeGeometry(7.5, 42, 16, 1, true);
-    beamGeom.translate(0, -21, 0);
-    beamGeom.rotateX(-Math.PI / 2);
-    this.landingBeamMat = new T.MeshBasicMaterial({
-      color: '#fff6db',
-      transparent: true,
-      opacity: 0,
-      depthWrite: false,
-      side: T.DoubleSide,
-      blending: T.AdditiveBlending,
+    // Glowing cowl headlight bulbs (visible from all camera angles without giant view-blocking cones)
+    this.landingBulbMat = new T.MeshBasicMaterial({
+      color: '#333333',
+      toneMapped: false,
     });
-    this.landingBeamMesh = new T.Mesh(beamGeom, this.landingBeamMat);
-    this.landingBeamMesh.position.set(0, -0.3, -4.5);
-    this.landingBeamMesh.rotation.x = -0.06;
-    this.plane.add(this.landingBeamMesh);
+    for (const sx of [-0.65, 0.65]) {
+      const bulb = new T.Mesh(new T.SphereGeometry(0.15, 8, 6), this.landingBulbMat);
+      bulb.position.set(sx, -0.4, -4.5);
+      this.plane.add(bulb);
+    }
   }
   updateMarker() {
     this.marker.visible = !this.sim.isSkywriting;
@@ -1755,15 +1758,17 @@ export class World {
     this.nightFactor += (targetNight - this.nightFactor) * nightBlend;
     this.nightSkyUniform.value = this.nightFactor;
 
-    const targetSunIntensity = forecast.sunlight * (1 - this.nightFactor * 0.96);
+    const targetSunIntensity = this.nightFactor > 0.3
+      ? 0.42 * (1 - forecast.cloud * 0.4)
+      : forecast.sunlight * (1 - this.nightFactor * 0.88);
     this.sun.intensity += (targetSunIntensity - this.sun.intensity) * blend;
-    this.sun.color.lerp(
-      this.weatherColor.set(forecast.cloud > 0.7 ? '#dce8ee' : '#ffe3a8'),
-      blend,
-    );
+
+    const daySunColor = forecast.cloud > 0.7 ? '#dce8ee' : '#ffe3a8';
+    const targetSunColor = new T.Color(daySunColor).lerp(new T.Color('#94b8e6'), this.nightFactor);
+    this.sun.color.lerp(targetSunColor, blend);
 
     if (this.hemiLight) {
-      const targetHemiIntensity = 1.25 - this.nightFactor * 1.03;
+      const targetHemiIntensity = 1.25 - this.nightFactor * 1.05;
       this.hemiLight.intensity += (targetHemiIntensity - this.hemiLight.intensity) * blend;
       const targetSky = new T.Color('#b9dbff').lerp(new T.Color(NIGHT_HEMI_SKY), this.nightFactor);
       const targetGround = new T.Color('#47572b').lerp(new T.Color(NIGHT_HEMI_GROUND), this.nightFactor);
@@ -1772,7 +1777,7 @@ export class World {
     }
 
     const fog = this.scene.fog as T.FogExp2;
-    const targetFogDensity = Math.max(forecast.fog, 0.00012 * this.nightFactor);
+    const targetFogDensity = Math.max(forecast.fog, 0.00014 * this.nightFactor);
     fog.density += (targetFogDensity - fog.density) * blend;
     const dayFogColor = this.weatherColor.set(
       forecast.kind === 'haze'
@@ -1785,10 +1790,10 @@ export class World {
     fog.color.lerp(targetFogColor, blend);
     this.cloudSystem?.updateWeather(forecast, dt, this.time);
     this.cloudMaterial?.color.lerp(
-      this.weatherColor.set(forecast.cloud > 0.7 ? '#a6b5bb' : '#f5f1df').lerp(new T.Color('#101824'), this.nightFactor * 0.85),
+      this.weatherColor.set(forecast.cloud > 0.7 ? '#a6b5bb' : '#f5f1df').lerp(new T.Color('#1e2838'), this.nightFactor * 0.85),
       blend,
     );
-    this.scene.environmentIntensity = (0.38 - this.weatherCover.value * 0.16) * (1 - this.nightFactor * 0.78);
+    this.scene.environmentIntensity = (0.38 - this.weatherCover.value * 0.16) * (1 - this.nightFactor * 0.94) + 0.02;
     this.rainLevel += (forecast.rain - this.rainLevel) * blend;
     this.rain.visible = this.rainLevel > 0.01;
     if (!this.rain.visible) return;
@@ -1925,23 +1930,25 @@ export class World {
     this.updateWeather(dt);
     this.sky?.position.copy(this.camera.position);
     this.nightSky?.update(dt, this.time, this.camera.position, this.nightFactor);
-    if (this.tailStrobeLight) {
+    if (this.tailStrobeMat) {
       const strobePhase = (this.time * 1.25) % 1.0;
-      const isStrobe = strobePhase < 0.07 || (strobePhase > 0.14 && strobePhase < 0.21);
-      this.tailStrobeLight.intensity = (isStrobe ? 3.5 : 0) * this.nightFactor;
+      const isStrobe = this.nightFactor > 0.1 && (strobePhase < 0.08 || (strobePhase > 0.16 && strobePhase < 0.24));
+      this.tailStrobeMat.color.set(isStrobe ? '#ffffff' : '#222222');
     }
     if (this.landingLight) {
-      this.landingLight.intensity = this.nightFactor * 4.2;
+      this.landingLight.intensity = this.nightFactor * 2.8;
     }
-    if (this.landingBeamMat) {
-      this.landingBeamMat.opacity = this.nightFactor * 0.16;
+    if (this.landingBulbMat) {
+      this.landingBulbMat.color.set(this.nightFactor > 0.1 ? '#fff7d9' : '#333333');
     }
     if (this.aircraftNavLights) {
-      this.aircraftNavLights.port.intensity = this.nightFactor * 1.2;
-      this.aircraftNavLights.stbd.intensity = this.nightFactor * 1.2;
+      this.aircraftNavLights.port.intensity = this.nightFactor * 0.8;
+      this.aircraftNavLights.stbd.intensity = this.nightFactor * 0.8;
     }
     this.plane.visible = this.cameraMode !== 1;
-    this.sun.position.copy(this.plane.position).add(SUN_OFFSET);
+    const moonOffset = new T.Vector3(-540, 860, -620);
+    const celestialOffset = SUN_OFFSET.clone().lerp(moonOffset, this.nightFactor);
+    this.sun.position.copy(this.plane.position).add(celestialOffset);
     this.sun.target.position.copy(this.plane.position);
     const cloudWind = windVector(this.flightWeather, this.time);
     this.cloudGroup.position.x += cloudWind.x * dt * 0.5;
@@ -1960,13 +1967,18 @@ export class World {
         (2 * Math.tan((this.camera.fov * Math.PI) / 360)),
     );
     this.rallyWorld?.update(this.sim.rallyState, this.time);
-    this.sunRays?.update(
-      dt,
-      this.time,
-      this.weatherCover.value,
-      this.sim.y,
-      this.sun.position,
-    );
+    if (this.sunRays) {
+      this.sunRays.group.visible = this.nightFactor < 0.25;
+      if (this.sunRays.group.visible) {
+        this.sunRays.update(
+          dt,
+          this.time,
+          this.weatherCover.value,
+          this.sim.y,
+          this.sun.position,
+        );
+      }
+    }
     const skyEvents =
       this.skyLife?.update(
         dt,
@@ -2356,7 +2368,8 @@ export class World {
     this.nightSky?.dispose();
     this.farmsteadLights?.dispose();
     this.roadTraffic?.dispose();
-    this.landingBeamMat?.dispose();
+    this.tailStrobeMat?.dispose();
+    this.landingBulbMat?.dispose();
     this.skywriting?.dispose();
     this.rallyWorld?.dispose();
     this.rivalCoverageMesh?.geometry.dispose();

@@ -120,12 +120,12 @@ export function createStarfieldMaterial(): T.ShaderMaterial {
 
       void main() {
         vColor = color;
-        // Twinkling scintillation oscillation
-        float twinkle = 0.65 + 0.35 * sin(time * 2.8 + phase * 4.0);
+        // Calm, authentic celestial scintillation (no rapid buzzing or jumping points)
+        float twinkle = 0.88 + 0.12 * sin(time * 0.7 + phase * 2.5);
         vAlpha = opacity * twinkle;
 
         vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
-        gl_PointSize = size * pixelRatio * (1.0 + 0.2 * sin(time * 3.5 + phase));
+        gl_PointSize = size * pixelRatio * 1.1;
         gl_Position = projectionMatrix * mvPosition;
       }
     `,
@@ -220,17 +220,9 @@ export class NightSkySystem {
   constructor(public scene: T.Scene) {
     this.group.name = 'night-sky-system';
 
-    // 1. Directional Moonlight
+    // 1. Directional Moonlight (soft non-conflicting nocturnal fill light)
     this.moonLight = new T.DirectionalLight(MOON_LIGHT_COLOR, 0.0);
-    this.moonLight.castShadow = true;
-    this.moonLight.shadow.mapSize.set(1024, 1024);
-    this.moonLight.shadow.camera.left = -160;
-    this.moonLight.shadow.camera.right = 160;
-    this.moonLight.shadow.camera.top = 160;
-    this.moonLight.shadow.camera.bottom = -160;
-    this.moonLight.shadow.camera.near = 1;
-    this.moonLight.shadow.camera.far = 2000;
-    this.moonLight.shadow.bias = -0.0006;
+    this.moonLight.castShadow = false;
     this.scene.add(this.moonLight, this.moonLight.target);
 
     // 2. Celestial Starfield
