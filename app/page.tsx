@@ -1394,7 +1394,7 @@ export default function Home() {
           <span className="scene-dot" />
           <div>
             <strong>O'BRIEN COUNTY, IOWA</strong>
-            <small>Hartley · 2920 Yew Ave</small>
+            <small>Hartley · Yew Avenue</small>
           </div>
         </div>
       )}
@@ -2484,7 +2484,7 @@ function drawMap(
       ctx.restore();
     }
 
-    // 2920 Yew Ave Home Farmstead & Airstrip
+    // Yew Ave Home Farmstead & Airstrip
     const hx = px(-315), hz = pz(-195);
     if (hx > 15 && hx < w - 15 && hz > 15 && hz < h - 15) {
       ctx.fillStyle = '#ef4444';
@@ -2492,7 +2492,7 @@ function drawMap(
       ctx.arc(hx, hz, 3.5, 0, Math.PI * 2);
       ctx.fill();
       ctx.fillStyle = '#ffffff';
-      ctx.fillText('2920 YEW AVE', hx, hz - 8);
+      ctx.fillText('YEW AVE STRIP', hx, hz - 8);
     }
   }
   ctx.fillStyle = '#c5dd6540';

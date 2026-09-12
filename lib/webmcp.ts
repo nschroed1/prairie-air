@@ -113,7 +113,7 @@ export function registerFlightTools(
     {
       name: 'start_flight_contract',
       description:
-        'Start or restart a Prairie Air contract and reset its coverage. Contract IDs are 0 (2920 Yew Ave Miller corn), 1 (Willow Creek soybeans), or 2 (Ocheyedan Valley pasture).',
+        'Start or restart a Prairie Air contract and reset its coverage. Contract IDs are 0 (Yew Ave Miller corn), 1 (Willow Creek soybeans), or 2 (Ocheyedan Valley pasture).',
       inputSchema: {
         type: 'object',
         properties: { contractId: { type: 'integer', minimum: 0, maximum: 2 } },

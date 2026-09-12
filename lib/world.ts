@@ -900,7 +900,7 @@ export class World {
         this.box(1, 4, 1, white, -70 + f * 14, 2, 48, p);
       this.box(57, 0.7, 0.6, white, -70, 2.8, 48, p);
       if (farmIndex === 0) {
-        // 2920 Yew Ave Grass Airstrip, Windsock, Refill depot & Mailbox
+        // Yew Ave Grass Airstrip, Windsock, Refill depot & Mailbox
         this.landPatch(26, 280, x + 40, z, mat('#4f7435', { roughness: 0.96 }), 0.26, 16);
         for (let mz = -120; mz <= 120; mz += 40) {
           this.box(0.6, 0.3, 2.4, white, 28, 0.2, mz, p);

@@ -306,17 +306,36 @@ void test('rudder authority introduces yaw rate without requiring wing bank', ()
 void test('climbing bleeds airspeed and diving accelerates the aircraft', () => {
   const simClimb = new Simulation();
   simClimb.reset(fullField);
-  for (let i = 0; i < 60; i++)
+  const startClimbSpeed = simClimb.speed;
+  for (let i = 0; i < 90; i++)
     simClimb.step(1 / 60, { ...freshControls(), up: true });
 
   const simDive = new Simulation();
   simDive.reset(fullField);
-  for (let i = 0; i < 60; i++)
+  simDive.y += 120; // Provide altitude clearance for sustained dive
+  const startDiveSpeed = simDive.speed;
+  for (let i = 0; i < 90; i++)
     simDive.step(1 / 60, { ...freshControls(), down: true });
 
   assert.ok(
-    simDive.speed > simClimb.speed + 1.5,
-    'Diving aircraft accelerates relative to climbing aircraft',
+    simClimb.speed < startClimbSpeed - 2.5,
+    `Climbing aircraft bleeds airspeed (started ${startClimbSpeed}, now ${simClimb.speed})`,
+  );
+  assert.ok(
+    simDive.speed > startDiveSpeed + 2.5,
+    `Diving aircraft accelerates (started ${startDiveSpeed}, now ${simDive.speed})`,
+  );
+  assert.ok(
+    simDive.speed > simClimb.speed + 5.0,
+    'Diving aircraft significantly accelerates relative to climbing aircraft',
+  );
+
+  // Level off from climb recovers speed back toward cruise
+  for (let i = 0; i < 240; i++)
+    simClimb.step(1 / 60, freshControls());
+  assert.ok(
+    simClimb.speed > startClimbSpeed - 1.2,
+    'Level flight after climb recovers cruise airspeed',
   );
 });
 

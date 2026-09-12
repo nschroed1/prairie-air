@@ -112,8 +112,8 @@ export type Contract = {
 export const contracts: readonly Contract[] = [
   {
     id: 0,
-    name: '2920 Yew Ave Home Strip',
-    farmer: 'Miller Family (2920 Yew Ave)',
+    name: 'Yew Avenue Home Strip',
+    farmer: 'Miller Family Farm',
     crop: 'corn',
     treatment: 'Fertilizer',
     x: 0,
@@ -123,7 +123,7 @@ export const contracts: readonly Contract[] = [
     depth: 288,
     windStrength: 0.35,
     briefing:
-      'Home field at 2920 Yew Ave, Hartley. Follow the white line, hold Space over the marked corn, then release before turning. Take your time lining up the next strip.',
+      'Home field along Yew Avenue, Hartley. Follow the white line, hold Space over the marked corn, then release before turning. Take your time lining up the next strip.',
     pay: 750,
     bonus: 250,
     target: 80,
@@ -905,10 +905,24 @@ export class Simulation {
       76,
     );
     // Aerodynamic energy exchange: climb bleeds speed, dive adds speed
-    const pitchFactor = Math.sin(this.pitch);
-    const gravityAccel = -pitchFactor * 9.81 * 0.6;
-    this.speed += (this.throttle - this.speed) * dt * 1.8 + gravityAccel * dt;
-    this.speed = Math.max(22, this.speed);
+    const sinPitch = Math.sin(this.pitch);
+    let accel = 0;
+    if (sinPitch >= 0) {
+      // Climbing: gravity decelerates flight path; induced drag increases with angle of attack
+      const gravityDecel = sinPitch * 9.81 * 0.9;
+      const inducedDrag = sinPitch * sinPitch * 2.5;
+      const engineDrive = (this.throttle - this.speed) * 0.6;
+      accel = engineDrive - gravityDecel - inducedDrag;
+    } else {
+      // Diving: gravity accelerates aircraft forward; parasite drag opposes overspeed
+      const gravityAssist = -sinPitch * 9.81 * 0.9;
+      const drag =
+        (this.speed - this.throttle) * 0.4 +
+        (this.speed > 48 ? Math.pow((this.speed - 48) / 14, 2) * 2.2 : 0);
+      accel = gravityAssist - drag;
+    }
+    this.speed += accel * dt;
+    this.speed = Math.max(22, Math.min(85, this.speed));
 
     // Low-speed stall physics below 25 m/s (~50 kt)
     const stallSpeed = 25.0;
