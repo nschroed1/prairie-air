@@ -555,3 +555,49 @@ void test('StuntWorldProps clean disposal frees meshes, geometries, and material
   assert.equal(stuntProps.wireSpans.length, 0);
   assert.equal(stuntProps.obstacles.length, 0);
 });
+
+void test('physical collision: flying into trestle bridge deck triggers crash', () => {
+  const sim = new Simulation();
+  sim.reset(contracts[0]);
+  const b = sim.stunts.trestleBridge;
+  sim.x = b.riverX;
+  sim.z = b.z;
+  sim.y = b.deckY - 1.0; // Right into the bridge structure above the arch
+  sim.stepHazards(0.016);
+  assert.equal(sim.phase, 'crashed');
+  assert.match(sim.crashReason, /Trestle bridge strike/);
+});
+
+void test('physical collision: low-speed wire strike crashes aircraft, high speed inflicts damage', () => {
+  const sim = new Simulation();
+  sim.reset(contracts[0]);
+  const span = sim.stunts.wireSpans[0];
+  assert.ok(span !== undefined);
+
+  // Position plane at wire level
+  sim.x = span.midpoint.x;
+  sim.z = span.midpoint.z;
+  sim.y = ground(sim.x, sim.z) + 8.5; // Wire level (8.5m AGL)
+
+  // Low speed wire strike crashes
+  sim.speed = 25.0;
+  sim.stepHazards(0.016);
+  assert.equal(sim.phase, 'crashed');
+  assert.match(sim.crashReason, /Power wire strike/);
+
+  // High speed wire strike inflicts damage and roll upset
+  const simFast = new Simulation();
+  simFast.reset(contracts[0]);
+  simFast.x = span.midpoint.x;
+  simFast.z = span.midpoint.z;
+  simFast.y = ground(simFast.x, simFast.z) + 8.5;
+  simFast.speed = 36.0;
+  const initialIntegrity = simFast.integrity;
+  simFast.stepHazards(0.016);
+  assert.equal(simFast.phase, 'flying');
+  assert.ok(
+    simFast.integrity < initialIntegrity,
+    'Wire strike damaged aircraft integrity',
+  );
+  assert.ok(Math.abs(simFast.roll) > 0.1, 'Wire strike induced roll upset');
+});

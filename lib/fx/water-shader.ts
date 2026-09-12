@@ -58,7 +58,7 @@ uniform float waterTime;
 uniform vec3 sunDirection;
 ` + shader.fragmentShader;
 
-    // Fragment Shader: color absorption/depth + dual-layer caustic ripples
+    // Fragment Shader: color absorption/depth + downstream caustic ripples
     shader.fragmentShader = shader.fragmentShader.replace(
       '#include <color_fragment>',
       `#include <color_fragment>
@@ -68,25 +68,28 @@ uniform vec3 sunDirection;
       vec3 shallowBank = vec3(0.24, 0.62, 0.90); // Clear bright sky-blue banks
       vec3 depthColor = mix(deepChannel, shallowBank, smoothstep(0.0, 1.0, bankDist));
 
-      // Dual-layer caustic ripples: intersecting sine/cosine noise layers flowing along the river
-      float ripple1 = sin(vWater.x * 0.28 + vWater.z * 0.14 + waterTime * 1.6) * cos(vWater.z * 0.34 - waterTime * 1.2);
-      float ripple2 = cos(vWater.x * 0.19 - vWater.z * 0.29 + waterTime * 2.1) * sin(vWater.x * 0.13 + vWater.z * 0.18 - waterTime * 0.85);
+      // Curvilinear downstream flow coordinates along the river channel
+      float downriver = vWater.z * 0.08 - waterTime * 1.8;
+      float crossriver = vWater.x * 0.14;
+      float ripple1 = sin(crossriver + downriver * 1.2) * cos(downriver * 1.8 - crossriver * 0.5);
+      float ripple2 = cos(crossriver * 1.3 - downriver * 1.5) * sin(crossriver * 0.7 + downriver * 0.9);
       float caustics = (ripple1 + ripple2) * 0.5;
-      float causticHighlight = pow(max(0.0, caustics + 0.35), 2.8) * 0.24;
-      float riverFlow = sin(vWater.x * 0.015 + vWater.z * 0.025 + waterTime * 0.15) * 0.08;
+      float causticHighlight = pow(max(0.0, caustics + 0.35), 2.8) * 0.28;
+      float riverFlow = sin(crossriver * 0.2 + downriver * 0.4) * 0.06;
 
-      diffuseColor.rgb = depthColor * (0.92 + riverFlow) + vec3(0.35, 0.70, 0.98) * causticHighlight;`,
+      diffuseColor.rgb = depthColor * (0.94 + riverFlow) + vec3(0.38, 0.76, 0.98) * causticHighlight;`,
     );
 
     // Fragment Shader: specular sun glint normal perturbation
     shader.fragmentShader = shader.fragmentShader.replace(
       '#include <normal_fragment_begin>',
       `#include <normal_fragment_begin>
-      // Specular sun glint normal perturbation
+      // Downstream specular sun glint normal perturbation
+      float flowZ = vWater.z * 0.12 - waterTime * 2.0;
       vec3 glintNormal = vec3(
-        cos(vWater.x * 0.24 + waterTime * 1.4) * 0.08 + cos(vWater.x * 0.65 - waterTime * 2.5) * 0.04,
+        cos(vWater.x * 0.18 + flowZ * 0.5) * 0.06 + cos(vWater.x * 0.45 - flowZ * 1.2) * 0.03,
         0.0,
-        sin(vWater.z * 0.28 - waterTime * 1.1) * 0.10 + sin(vWater.z * 0.70 - waterTime * 2.3) * 0.05
+        sin(flowZ) * 0.08 + sin(flowZ * 2.1) * 0.04
       );
       normal = normalize(normal + mat3(viewMatrix) * glintNormal);`,
     );
@@ -102,8 +105,8 @@ uniform vec3 sunDirection;
     // Fragment Shader: Fresnel sky reflection at glancing angles
     shader.fragmentShader = shader.fragmentShader.replace(
       '#include <opaque_fragment>',
-      `// Fresnel reflection factor: glancing angles reflect more sky color
-      vec3 skyReflection = vec3(0.55, 0.72, 0.88);
+      `// Fresnel reflection factor: glancing angles reflect luminous sky gradient
+      vec3 skyReflection = mix(vec3(0.55, 0.74, 0.92), vec3(0.85, 0.92, 0.98), max(0.0, dot(geometryNormal, sunDirection)));
       outgoingLight = mix(outgoingLight, skyReflection, fresnel * 0.65);
       #include <opaque_fragment>`,
     );

@@ -951,6 +951,57 @@ export class Simulation {
   }
 
   stepHazards(dt: number) {
+    // 1. Trestle Bridge Physical Collision Check
+    const bridge = this.stunts.trestleBridge;
+    if (Math.abs(this.z - bridge.z) < 3.2) {
+      const gorgeDist = Math.abs(this.x - bridge.riverX);
+      if (gorgeDist < bridge.spanWidth / 2 - 2.0) {
+        const heightAboveWater = this.y - bridge.waterY;
+        if (heightAboveWater > 7.2 && this.y <= bridge.deckY + 2.5) {
+          this.crash(
+            'Trestle bridge strike · thread between 10 and 23 ft above water.',
+          );
+          return;
+        }
+      }
+    }
+
+    // 2. Telephone Wire Physical Strike Check
+    if (this.altitude >= 7.3 && this.altitude <= 10.8) {
+      for (const span of this.stunts.wireSpans) {
+        const dx = span.p2.x - span.p1.x;
+        const dz = span.p2.z - span.p1.z;
+        const segLen2 = dx * dx + dz * dz;
+        if (segLen2 > 0) {
+          const u = Math.max(
+            0,
+            Math.min(
+              1,
+              ((this.x - span.p1.x) * dx + (this.z - span.p1.z) * dz) /
+                segLen2,
+            ),
+          );
+          const projX = span.p1.x + u * dx;
+          const projZ = span.p1.z + u * dz;
+          if (Math.hypot(this.x - projX, this.z - projZ) < 3.0) {
+            if (this.speed < 32) {
+              this.crash(
+                'Power wire strike · fly under telephone lines or climb over poles.',
+              );
+              return;
+            } else {
+              this.integrity = Math.max(0, this.integrity - 28);
+              this.roll += 0.35;
+              this.hazardEvent =
+                'Wire snag · airframe damaged · level out, then R to repair';
+              this.hazardEventUntil = this.elapsed + 4;
+              break;
+            }
+          }
+        }
+      }
+    }
+
     const plan = this.job.challenge;
     if (!plan) return;
     let inAnyBarn = false;

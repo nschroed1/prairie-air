@@ -771,41 +771,63 @@ export class World {
     for (const mesh of Object.values(this.cropDetail)) mesh.visible = visible;
     if (!visible || (!force && cell === this.detailCell)) return;
     this.detailCell = cell;
-    const counts = { corn: 0, soybeans: 0, pasture: 0 };
-    for (let z = cz - 245; z <= cz + 245; z += 7)
-      for (let x = cx - 245; x <= cx + 245; x += 3.5) {
-        const field = fieldLookup.get(
-          `${Math.round(x / 510)},${Math.round(z / 510)}`,
-        );
-        if (
-          !field ||
-          !insideField(field, x, z) ||
-          inFarmClearing(x, z) ||
-          (this.guidanceAvailable &&
-            inNoSprayZone(this.sim.job, x - this.sim.job.x, z - this.sim.job.z))
-        )
-          continue;
-        // Hash absolute plant coordinates so overlapping tiles keep identical plants.
-        let seed =
-          (Math.imul(Math.round(x * 2), 374761393) +
-            Math.imul(Math.round(z * 2), 668265263)) >>>
-          0;
-        seed = Math.imul(seed ^ (seed >>> 13), 1274126177) >>> 0;
-        const a = (seed & 255) / 255,
-          b = ((seed >>> 8) & 255) / 255;
-        const c = ((seed >>> 16) & 255) / 255,
-          d = (seed >>> 24) / 255;
-        if (field.crop === 'pasture' && a > 0.45) continue;
-        const mesh = this.cropDetail[field.crop]!;
-        if (counts[field.crop] >= 11000) continue;
-        const px = x + (b - 0.5) * 0.5,
-          pz = z + (c - 0.5) * 1.2;
-        dummy.position.set(px, ground(px, pz) + 0.08, pz);
-        dummy.rotation.set(0, d * 1.4, 0);
-        dummy.scale.setScalar(0.78 + a * 0.28);
-        dummy.updateMatrix();
-        mesh.setMatrixAt(counts[field.crop]++, dummy.matrix);
+    // Fast spatial pre-filtering: candidate fields overlapping visible boundary
+    const minGx = Math.round((cx - 245) / 510) - 1;
+    const maxGx = Math.round((cx + 245) / 510) + 1;
+    const minGz = Math.round((cz - 245) / 510) - 1;
+    const maxGz = Math.round((cz + 245) / 510) + 1;
+    const nearby: (typeof fields)[number][] = [];
+    for (let gz = minGz; gz <= maxGz; gz++) {
+      for (let gx = minGx; gx <= maxGx; gx++) {
+        const f = fieldLookup.get(`${gx},${gz}`);
+        if (f) nearby.push(f);
       }
+    }
+
+    const counts = { corn: 0, soybeans: 0, pasture: 0 };
+    if (nearby.length > 0) {
+      for (let z = cz - 245; z <= cz + 245; z += 7) {
+        for (let x = cx - 245; x <= cx + 245; x += 3.5) {
+          let field: (typeof fields)[number] | undefined;
+          for (let fi = 0; fi < nearby.length; fi++) {
+            const f = nearby[fi];
+            if (Math.abs(x - f.x) <= 230 && Math.abs(z - f.z) <= 230) {
+              if (insideField(f, x, z)) {
+                field = f;
+                break;
+              }
+            }
+          }
+          if (
+            !field ||
+            inFarmClearing(x, z) ||
+            (this.guidanceAvailable &&
+              inNoSprayZone(this.sim.job, x - this.sim.job.x, z - this.sim.job.z))
+          )
+            continue;
+          // Hash absolute plant coordinates so overlapping tiles keep identical plants.
+          let seed =
+            (Math.imul(Math.round(x * 2), 374761393) +
+              Math.imul(Math.round(z * 2), 668265263)) >>>
+            0;
+          seed = Math.imul(seed ^ (seed >>> 13), 1274126177) >>> 0;
+          const a = (seed & 255) / 255,
+            b = ((seed >>> 8) & 255) / 255;
+          const c = ((seed >>> 16) & 255) / 255,
+            d = (seed >>> 24) / 255;
+          if (field.crop === 'pasture' && a > 0.45) continue;
+          const mesh = this.cropDetail[field.crop]!;
+          if (counts[field.crop] >= 11000) continue;
+          const px = x + (b - 0.5) * 0.5,
+            pz = z + (c - 0.5) * 1.2;
+          dummy.position.set(px, ground(px, pz) + 0.08, pz);
+          dummy.rotation.set(0, d * 1.4, 0);
+          dummy.scale.setScalar(0.78 + a * 0.28);
+          dummy.updateMatrix();
+          mesh.setMatrixAt(counts[field.crop]++, dummy.matrix);
+        }
+      }
+    }
     for (const crop of ['corn', 'soybeans', 'pasture'] as const) {
       const mesh = this.cropDetail[crop]!;
       mesh.count = counts[crop];
@@ -1051,11 +1073,11 @@ export class World {
       blade.rotation.z = (i * Math.PI) / 3;
     }
     const disc = this.addMesh(
-      new T.CircleGeometry(2.0, 40),
+      new T.CircleGeometry(2.0, 48),
       new T.MeshBasicMaterial({
-        color: '#e5e8cb',
+        color: '#e8eed5',
         transparent: true,
-        opacity: 0.09,
+        opacity: 0.16,
         side: T.DoubleSide,
         depthWrite: false,
       }),
@@ -1065,6 +1087,21 @@ export class World {
       this.prop,
     );
     disc.castShadow = false;
+    const tipArc = this.addMesh(
+      new T.RingGeometry(1.82, 2.0, 48),
+      new T.MeshBasicMaterial({
+        color: '#eab308',
+        transparent: true,
+        opacity: 0.38,
+        side: T.DoubleSide,
+        depthWrite: false,
+      }),
+      0,
+      0,
+      -0.04,
+      this.prop,
+    );
+    tipArc.castShadow = false;
   }
   detailPlane() {
     const enamel = mat('#e3a919', { metalness: 0.3, roughness: 0.3 });

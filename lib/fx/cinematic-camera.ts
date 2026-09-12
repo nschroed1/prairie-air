@@ -2,12 +2,14 @@ import * as T from 'three';
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
+import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 import type { Simulation } from '../simulation';
 
 export class CinematicCamera {
   composer: EffectComposer | null = null;
   bloomPass: UnrealBloomPass | null = null;
   renderPass: RenderPass | null = null;
+  outputPass: OutputPass | null = null;
   baseFov: number = 50;
   enabled: boolean = true;
   reducedMotion = false;
@@ -25,12 +27,26 @@ export class CinematicCamera {
       const height = this.renderer.domElement?.clientHeight || 768;
       const resolution = new T.Vector2(width, height);
 
-      const composer = new EffectComposer(this.renderer);
+      const isWebGL2 = typeof WebGL2RenderingContext !== 'undefined';
+      const renderTarget = new T.WebGLRenderTarget(width, height, {
+        type: T.HalfFloatType,
+        format: T.RGBAFormat,
+        colorSpace: T.SRGBColorSpace,
+        samples: isWebGL2 ? 4 : 0,
+      });
+
+      const composer = new EffectComposer(this.renderer, renderTarget);
       const renderPass = new RenderPass(this.scene, this.camera);
       composer.addPass(renderPass);
 
       const bloomPass = new UnrealBloomPass(resolution, 0.22, 0.35, 0.86);
       composer.addPass(bloomPass);
+
+      if (this.renderer && 'outputColorSpace' in this.renderer && this.renderer.outputColorSpace) {
+        const outputPass = new OutputPass();
+        composer.addPass(outputPass);
+        this.outputPass = outputPass;
+      }
 
       this.composer = composer;
       this.renderPass = renderPass;
@@ -43,6 +59,7 @@ export class CinematicCamera {
       this.composer = null;
       this.renderPass = null;
       this.bloomPass = null;
+      this.outputPass = null;
     }
   }
 
@@ -98,6 +115,10 @@ export class CinematicCamera {
     if (this.renderPass) {
       this.renderPass.dispose();
       this.renderPass = null;
+    }
+    if (this.outputPass) {
+      this.outputPass.dispose();
+      this.outputPass = null;
     }
     if (this.composer) {
       this.composer.dispose();
