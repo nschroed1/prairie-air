@@ -187,7 +187,7 @@ export class SkywritingWorld {
           this.dummy.position.set(p.x, p.y, p.z);
           this.dummy.lookAt(
             p.x + after.x - before.x,
-            p.y,
+            p.y + after.y - before.y,
             p.z + after.z - before.z,
           );
           this.dummy.updateMatrix();

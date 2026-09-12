@@ -27,23 +27,25 @@ export type SkywritingState = {
   sampleDistance: number;
 };
 
-// A rounded heart, sampled at equal distances. Its turns are large enough for
-// the normal 34 m/s flight controls; it does not require aerobatic mode.
+// A rounded heart with 3D altitude relief (cresting at the lobes and descending
+// toward the tip), sampled at equal distances. Its turns and vertical slopes are
+// balanced for the normal 34 m/s flight controls; it does not require aerobatic mode.
+const amp = 35;
 const anchors = [
-  [0, -70],
-  [70, -150],
-  [160, -145],
-  [220, -65],
-  [205, 35],
-  [130, 125],
-  [35, 205],
-  [0, 215],
-  [-35, 205],
-  [-130, 125],
-  [-205, 35],
-  [-220, -65],
-  [-160, -145],
-  [-70, -150],
+  [0, amp * 0.3, -70],
+  [70, amp * 0.9, -150],
+  [160, amp * 0.7, -145],
+  [220, amp * 0.2, -65],
+  [205, -amp * 0.2, 35],
+  [130, -amp * 0.6, 125],
+  [35, -amp * 0.9, 205],
+  [0, -amp * 1.0, 215],
+  [-35, -amp * 0.9, 205],
+  [-130, -amp * 0.6, 125],
+  [-205, -amp * 0.2, 35],
+  [-220, amp * 0.2, -65],
+  [-160, amp * 0.7, -145],
+  [-70, amp * 0.9, -150],
 ];
 const curve = (p0: number, p1: number, p2: number, p3: number, t: number) =>
   0.5 *
@@ -64,14 +66,19 @@ const dense = Array.from({ length: anchors.length * 40 + 1 }, (_, i) => {
   ];
   return {
     x: curve(p[0][0], p[1][0], p[2][0], p[3][0], t) * 1.5,
-    z: curve(p[0][1], p[1][1], p[2][1], p[3][1], t) * 1.5,
+    y: curve(p[0][1], p[1][1], p[2][1], p[3][1], t),
+    z: curve(p[0][2], p[1][2], p[2][2], p[3][2], t) * 1.5,
   };
 });
 const distances = [0];
 for (let i = 1; i < dense.length; i++)
   distances.push(
     distances[i - 1] +
-      Math.hypot(dense[i].x - dense[i - 1].x, dense[i].z - dense[i - 1].z),
+      Math.hypot(
+        dense[i].x - dense[i - 1].x,
+        dense[i].y - dense[i - 1].y,
+        dense[i].z - dense[i - 1].z,
+      ),
   );
 export const SKY_LENGTH = distances.at(-1)!;
 export const SKY_SPACING = SKY_LENGTH / SKY_SEGMENTS;
@@ -85,6 +92,7 @@ const template = Array.from({ length: SKY_SEGMENTS + 1 }, (_, i) => {
     (distance - distances[end - 1]) / (distances[end] - distances[end - 1]);
   return {
     x: dense[end - 1].x + (dense[end].x - dense[end - 1].x) * t,
+    y: dense[end - 1].y + (dense[end].y - dense[end - 1].y) * t,
     z: dense[end - 1].z + (dense[end].z - dense[end - 1].z) * t,
   };
 });
@@ -141,20 +149,18 @@ export function skywritingContract<T extends Contract>(
 export function skyRoute(job: Contract): SkyPoint[] {
   return template.map((p) => ({
     x: job.x + p.x,
-    y: job.skywriting!.altitude,
+    y: job.skywriting!.altitude + p.y,
     z: job.z + p.z,
   }));
 }
 export function skyAudienceView(job: Contract, aspect: number) {
-  const z = job.z + (aspect < 0.8 ? 145 : 55);
+  const dist = aspect < 0.8 ? 1200 : 540;
+  const z = job.z - dist;
   const eye = { x: job.x, y: ground(job.x, z) + 1.7, z };
-  const look = { x: job.x, y: job.skywriting!.altitude, z };
-  const fov = Math.min(
-    135,
-    (2 * Math.atan(Math.max(460, 400 / aspect) / (look.y - eye.y)) * 180) /
-      Math.PI,
-  );
-  return { eye, look, fov };
+  const look = { x: job.x, y: job.skywriting!.altitude + 15, z: job.z };
+  const fov = aspect < 0.8 ? 72 : 62;
+  const up = { x: 0, y: 1, z: 0 };
+  return { eye, look, fov, up };
 }
 export const skyWeather = (job: Contract): Weather => ({
   ...LESSON_WEATHER,
@@ -201,42 +207,60 @@ export function stepSkywriting(
   const previous = state.last;
   state.last = { x: position.x, y: position.y, z: position.z };
   if (!previous) return;
-  const travel = Math.hypot(position.x - previous.x, position.z - previous.z);
+  const travel = Math.hypot(
+    position.x - previous.x,
+    position.y - previous.y,
+    position.z - previous.z,
+  );
   if (travel > Math.max(4, speed * dt * 1.8) || travel < 1e-8) return;
   const route = skyRoute(job),
     current = Math.min(
       SKY_SEGMENTS - 1,
       Math.floor(state.progress / SKY_SPACING),
     );
-  let best = { distance: Infinity, progress: state.progress, forward: false };
+  let best = {
+    distance: Infinity,
+    vertical: Infinity,
+    progress: state.progress,
+    forward: false,
+  };
   for (let i = current; i <= Math.min(current + 2, SKY_SEGMENTS - 1); i++) {
     const a = route[i],
       b = route[i + 1],
       dx = b.x - a.x,
+      dy = b.y - a.y,
       dz = b.z - a.z;
+    const lenSq = dx * dx + dy * dy + dz * dz;
     const t = Math.max(
       0,
       Math.min(
         1,
-        ((position.x - a.x) * dx + (position.z - a.z) * dz) /
-          (dx * dx + dz * dz),
+        ((position.x - a.x) * dx +
+          (position.y - a.y) * dy +
+          (position.z - a.z) * dz) /
+          lenSq,
       ),
     );
     const distance = Math.hypot(
       position.x - a.x - dx * t,
+      position.y - a.y - dy * t,
       position.z - a.z - dz * t,
     );
     if (distance < best.distance)
       best = {
         distance,
+        vertical: Math.abs(position.y - (a.y + dy * t)),
         progress: (i + t) * SKY_SPACING,
         forward:
-          (position.x - previous.x) * dx + (position.z - previous.z) * dz > 0,
+          (position.x - previous.x) * dx +
+            (position.y - previous.y) * dy +
+            (position.z - previous.z) * dz >
+          0,
       };
   }
   const onRoute =
     best.distance <= job.skywriting!.tolerance &&
-    Math.abs(position.y - job.skywriting!.altitude) <= 14 &&
+    best.vertical <= 14 &&
     best.forward;
   const old = state.progress;
   if (onRoute) state.progress = Math.max(state.progress, best.progress);
@@ -281,8 +305,12 @@ export function stepSkywriting(
   if (
     !state.loops &&
     state.progress >= SKY_LENGTH - SKY_SPACING * 0.6 &&
-    Math.hypot(position.x - finish.x, position.z - finish.z) <
-      job.skywriting!.tolerance
+    Math.hypot(
+      position.x - finish.x,
+      position.y - finish.y,
+      position.z - finish.z,
+    ) <=
+      job.skywriting!.tolerance + 10
   )
     state.loops = 1;
 }
@@ -296,7 +324,13 @@ export function skyGuidance(
   if (skyReady(job, state))
     return 'Heart complete · Enter to collect your pay and see the reveal';
   if (tank <= 0) return 'Smoke tank empty · R to refill and line up again';
-  const delta = job.skywriting!.altitude - y;
+  const next = Math.min(
+    SKY_SEGMENTS,
+    Math.ceil(state.progress / SKY_SPACING),
+  );
+  const route = skyRoute(job);
+  const targetY = route[next]?.y ?? job.skywriting!.altitude;
+  const delta = targetY - y;
   if (Math.abs(delta) > 14)
     return delta > 0
       ? 'Climb toward the gold gate · smoke off until you are level'

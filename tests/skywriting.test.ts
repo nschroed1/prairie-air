@@ -40,7 +40,11 @@ for (const level of [0, 1] as const)
     const sim = flight(level),
       route = skyRoute(sim.job);
     assert.ok(
-      Math.hypot(route[0].x - route[80].x, route[0].z - route[80].z) < 0.001,
+      Math.hypot(
+        route[0].x - route[80].x,
+        route[0].y - route[80].y,
+        route[0].z - route[80].z,
+      ) < 0.001,
     );
     assert.ok(route.every((p) => p.y - ground(p.x, p.z) >= 109));
     assert.equal(sim.collectibles.length, 0);
@@ -76,7 +80,11 @@ void test('out-of-order gates, high-altitude smoke, stationary smoke and telepor
       stepSkywriting(
         state,
         sim.job,
-        { x: a.x + (b.x - a.x) * t, y: a.y, z: a.z + (b.z - a.z) * t },
+        {
+          x: a.x + (b.x - a.x) * t,
+          y: a.y + (b.y - a.y) * t,
+          z: a.z + (b.z - a.z) * t,
+        },
         true,
         0.03,
         34,
@@ -95,7 +103,11 @@ void test('out-of-order gates, high-altitude smoke, stationary smoke and telepor
     stepSkywriting(
       high,
       sim.job,
-      { x: a.x + (b.x - a.x) * t, y: a.y + 20, z: a.z + (b.z - a.z) * t },
+      {
+        x: a.x + (b.x - a.x) * t,
+        y: a.y + (b.y - a.y) * t + 20,
+        z: a.z + (b.z - a.z) * t,
+      },
       true,
       0.03,
       34,
@@ -317,12 +329,12 @@ void test('smoke buffers stay bounded and repeated network snapshots do not dupl
 void test('the reveal looks up from standing height and keeps the heart readable on desktop and mobile', () => {
   const job = flight().job;
   for (const aspect of [1365 / 900, 390 / 844]) {
-    const { eye, look, fov } = skyAudienceView(job, aspect);
+    const { eye, look, fov, up } = skyAudienceView(job, aspect);
     assert.ok(Math.abs(eye.y - ground(eye.x, eye.z) - 1.7) < 1e-6);
     assert.ok(look.y > eye.y + 400);
     const camera = new T.PerspectiveCamera(fov, aspect, 0.1, 20000);
     camera.position.set(eye.x, eye.y, eye.z);
-    camera.up.set(0, 0, -1);
+    camera.up.set(up?.x ?? 0, up?.y ?? 1, up?.z ?? 0);
     camera.lookAt(look.x, look.y, look.z);
     camera.updateMatrixWorld();
     const projected = skyRoute(job).map((p) =>

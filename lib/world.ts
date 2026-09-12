@@ -1758,9 +1758,10 @@ export class World {
         eye,
         look: audienceLook,
         fov,
+        up,
       } = skyAudienceView(this.sim.job, this.camera.aspect);
       this.camera.position.set(eye.x, eye.y, eye.z);
-      this.camera.up.set(0, 0, -1);
+      this.camera.up.set(up?.x ?? 0, up?.y ?? 1, up?.z ?? 0);
       this.camera.lookAt(audienceLook.x, audienceLook.y, audienceLook.z);
       this.camera.fov = fov;
       this.camera.updateProjectionMatrix();
