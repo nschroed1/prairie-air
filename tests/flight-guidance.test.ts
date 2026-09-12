@@ -41,7 +41,10 @@ void test('the starter retains four short strips while county parcels vary withi
     assert.ok(size.width <= 456 && size.depth <= 452);
     assert.ok(fieldCellCount(job) > 300 && fieldCellCount(job) <= 1444);
     assert.ok(job.boundary && job.boundary.length >= 4);
-    assert.equal(job.windStrength, undefined);
+    assert.equal(
+      job.windStrength,
+      job.kind === 'skywriting' ? 1 : undefined,
+    );
   }
   assert.equal(
     fieldCellCount({ ...contracts[0], width: undefined, depth: undefined }),

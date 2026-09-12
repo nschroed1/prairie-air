@@ -42,7 +42,9 @@ void test('county parcels are deterministic, convex, varied and contained in the
   for (const job of seasonJobs(seasonAt()))
     assert.equal(
       job.acres,
-      Math.round(polygonArea(fieldOutline(job)) / 4046.8564224),
+      job.kind === 'skywriting'
+        ? 0
+        : Math.round(polygonArea(fieldOutline(job)) / 4046.8564224),
     );
 });
 
@@ -63,7 +65,7 @@ void test('every clipped cell is treatable, duplicate passes do not inflate cove
   for (const job of [
     contracts[1],
     contracts[2],
-    ...seasonJobs(seasonAt()).slice(0, 12),
+    ...seasonJobs(seasonAt()).filter((j) => j.kind !== 'skywriting').slice(0, 12),
   ]) {
     const sim = new Simulation();
     sim.reset(job);

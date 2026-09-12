@@ -226,6 +226,8 @@ export type Controls = {
   slower: boolean;
   spray: boolean;
   acro?: boolean;
+  rudderLeft?: boolean;
+  rudderRight?: boolean;
 };
 export const freshControls = (): Controls => ({
   left: false,
@@ -236,6 +238,8 @@ export const freshControls = (): Controls => ({
   slower: false,
   spray: false,
   acro: false,
+  rudderLeft: false,
+  rudderRight: false,
 });
 export const OVERSPRAY_PENALTY_PER_ACRE = 40;
 const SQUARE_METERS_PER_ACRE = 4046.8564224;
@@ -485,7 +489,10 @@ export class Simulation {
   }
   get cleanBonus() {
     if (this.isSkywriting) return skyAccuracy(this.skywriting) >= 95 ? 150 : 0;
-    return this.oversprayAcres < 0.01 ? 150 : 0;
+    if (this.oversprayAcres < 0.01) return 150;
+    if (this.oversprayAcres < 0.04) return 100;
+    if (this.oversprayAcres < 0.08) return 50;
+    return 0;
   }
   get parTime() {
     if (this.isSkywriting) return 110;
@@ -495,7 +502,7 @@ export class Simulation {
     return this.elapsed <= this.parTime ? 100 : 0;
   }
   get skillBonusLimit() {
-    return Math.max(750, Math.round(this.job.pay * 0.5));
+    return Math.max(1200, Math.round(this.job.pay * 0.8));
   }
   get pendingSkillBonus() {
     return Math.max(0, this.result.stuntBonus - this.bankedStuntBonus);
@@ -790,29 +797,51 @@ export class Simulation {
     if (input.acro) {
       this.roll += (Number(input.left) - Number(input.right)) * dt * 1.85;
       this.roll = Math.atan2(Math.sin(this.roll), Math.cos(this.roll));
+      this.pitch += (Number(input.up) - Number(input.down)) * dt * 1.4;
+      this.pitch = Math.atan2(Math.sin(this.pitch), Math.cos(this.pitch));
     } else {
       this.roll +=
         ((Number(input.left) - Number(input.right)) * 0.75 +
           gust.roll -
           this.roll) *
         smooth;
+      this.pitch +=
+        ((Number(input.up) - Number(input.down)) * 0.38 +
+          gust.pitch -
+          this.pitch) *
+        smooth;
     }
-    this.pitch +=
-      ((Number(input.up) - Number(input.down)) * 0.38 +
-        gust.pitch -
-        this.pitch) *
-      smooth;
     this.throttle = clamp(
       this.throttle + (Number(input.faster) - Number(input.slower)) * dt * 16,
       29,
       76,
     );
-    this.speed += (this.throttle - this.speed) * dt * 1.8;
-    this.heading -= (input.acro ? Math.sin(this.roll) : this.roll) * dt * 0.9;
+    // Aerodynamic energy exchange: climb bleeds speed, dive adds speed
+    const pitchFactor = Math.sin(this.pitch);
+    const gravityAccel = -pitchFactor * 9.81 * 0.6;
+    this.speed += (this.throttle - this.speed) * dt * 1.8 + gravityAccel * dt;
+    this.speed = Math.max(22, this.speed);
+
+    // Low-speed stall physics below 25 m/s (~50 kt)
+    const stallSpeed = 25.0;
+    let stallSink = 0;
+    if (this.speed < stallSpeed) {
+      const severity = (stallSpeed - this.speed) / (stallSpeed - 22);
+      stallSink = severity * 6.0 * dt;
+      if (!input.acro) {
+        this.pitch -= severity * 0.35 * dt;
+      }
+    }
+
+    const rudder =
+      (Number(input.rudderLeft ?? false) - Number(input.rudderRight ?? false)) *
+      0.45;
+    this.heading -=
+      ((input.acro ? Math.sin(this.roll) : this.roll) * 0.9 + rudder) * dt;
     const wind = this.windVector;
     this.x += (Math.sin(this.heading) * this.speed + wind.x) * dt;
     this.z += (-Math.cos(this.heading) * this.speed + wind.z) * dt;
-    this.y += Math.sin(this.pitch) * this.speed * dt;
+    this.y += Math.sin(this.pitch) * this.speed * dt - stallSink;
     this.y = Math.min(this.y, 600);
     if (
       this.altitude < 3 ||

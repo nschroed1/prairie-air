@@ -567,6 +567,8 @@ export default function Home() {
   useEffect(() => {
     const binding: Record<string, keyof ReturnType<typeof freshControls>> = {
       KeyQ: 'acro',
+      KeyZ: 'rudderLeft',
+      KeyX: 'rudderRight',
       KeyA: 'left',
       ArrowLeft: 'left',
       KeyD: 'right',

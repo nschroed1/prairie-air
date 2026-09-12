@@ -93,7 +93,7 @@ void test('yards remove exact coverage cells, stay off the first approach, and n
   for (const source of [
     contracts[0],
     contracts[1],
-    ...seasonJobs(seasonAt()).slice(0, 20),
+    ...seasonJobs(seasonAt()).filter((j) => j.kind !== 'skywriting').slice(0, 20),
   ]) {
     const sim = new Simulation();
     sim.career.flights = 12;

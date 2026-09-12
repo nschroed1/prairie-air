@@ -289,3 +289,60 @@ void test('coverage at field edges stays on the existing saved map grid', () => 
   assert.ok([...sim.covered].some((n) => Math.floor(n / 38) === 37));
   assert.ok([...sim.covered].every((n) => Math.floor(n / 38) < 38));
 });
+
+void test('rudder authority introduces yaw rate without requiring wing bank', () => {
+  const sim = new Simulation();
+  sim.reset(fullField);
+  const initialHeading = sim.heading;
+  sim.step(0.1, { ...freshControls(), rudderLeft: true });
+  assert.ok(sim.heading < initialHeading, 'Left rudder turns heading left');
+  assert.equal(sim.roll, 0, 'Wings remain level during pure rudder application');
+
+  sim.step(0.1, { ...freshControls(), rudderRight: true });
+  sim.step(0.1, { ...freshControls(), rudderRight: true });
+  assert.ok(sim.heading > initialHeading, 'Right rudder turns heading right');
+});
+
+void test('climbing bleeds airspeed and diving accelerates the aircraft', () => {
+  const simClimb = new Simulation();
+  simClimb.reset(fullField);
+  for (let i = 0; i < 60; i++)
+    simClimb.step(1 / 60, { ...freshControls(), up: true });
+
+  const simDive = new Simulation();
+  simDive.reset(fullField);
+  for (let i = 0; i < 60; i++)
+    simDive.step(1 / 60, { ...freshControls(), down: true });
+
+  assert.ok(
+    simDive.speed > simClimb.speed + 1.5,
+    'Diving aircraft accelerates relative to climbing aircraft',
+  );
+});
+
+void test('acro mode unclamps pitch for complete 360-degree rotation', () => {
+  const sim = new Simulation();
+  sim.reset(fullField);
+  // In normal mode, pitch is clamped <= 0.38
+  for (let i = 0; i < 120; i++) sim.step(1 / 60, { ...freshControls(), up: true });
+  assert.ok(sim.pitch <= 0.39);
+
+  // In acro mode, pitch integrates past the normal 0.38 clamp
+  sim.pitch = 0;
+  for (let i = 0; i < 60; i++)
+    sim.step(1 / 60, { ...freshControls(), up: true, acro: true });
+  assert.ok(sim.pitch > 0.8, 'Acro mode allows loop pitch past normal clamp');
+});
+
+void test('graduated clean bonus rewards precision with tiers at 0.01, 0.04, and 0.08 acres', () => {
+  const sim = new Simulation();
+  sim.reset(fullField);
+  sim.oversprayAcres = 0.005;
+  assert.equal(sim.cleanBonus, 150);
+  sim.oversprayAcres = 0.025;
+  assert.equal(sim.cleanBonus, 100);
+  sim.oversprayAcres = 0.06;
+  assert.equal(sim.cleanBonus, 50);
+  sim.oversprayAcres = 0.12;
+  assert.equal(sim.cleanBonus, 0);
+});
