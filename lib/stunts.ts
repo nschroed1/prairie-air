@@ -76,7 +76,7 @@ export const roadConfigs = [
     start: -1200,
     end: 750,
     step: 60,
-    name: 'North Section Road',
+    name: '300th Street Wires',
   },
   {
     axis: 'x' as const,
@@ -84,7 +84,7 @@ export const roadConfigs = [
     start: -1200,
     end: 750,
     step: 60,
-    name: 'South Section Road',
+    name: '290th Street Wires',
   },
   {
     axis: 'z' as const,
@@ -92,7 +92,7 @@ export const roadConfigs = [
     start: -1100,
     end: 1100,
     step: 60,
-    name: 'East Section Line',
+    name: '100th Avenue Wires',
   },
   {
     axis: 'z' as const,
@@ -100,7 +100,7 @@ export const roadConfigs = [
     start: -1100,
     end: 1100,
     step: 60,
-    name: 'West Section Line',
+    name: 'Yew Avenue Wires',
   },
 ];
 export const windmillLocations = [
@@ -499,7 +499,7 @@ export class StuntTracker {
       type: 'trestle-runner',
       name: 'Trestle Runner',
       bonus: TRESTLE_BONUS,
-      message: '★ TRESTLE RUNNER! Cedar Gorge Bridge (+$200)',
+      message: '★ TRESTLE RUNNER! Ocheyedan River Trestle (+$200)',
       targetName: 'trestle_bridge',
       intensity: 0.85,
     };

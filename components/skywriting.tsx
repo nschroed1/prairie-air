@@ -307,7 +307,7 @@ export function SkyJobOffer({
       <SkyPatternPlot job={job} />
       <div>
         <span className="eyebrow">SKYWRITING · OCCASIONAL JOB</span>
-        <h3>A heart above Cedar Valley.</h3>
+        <h3>A heart above O'Brien County.</h3>
         <p>
           Learn the turns, time your smoke, then fly a wedding commission when
           one opens.

@@ -213,7 +213,7 @@ export class StuntWorldProps extends StuntTracker {
   }
 
   /**
-   * Builds the timber railroad trestle bridge spanning the Cedar River gorge at z = 150m.
+   * Builds the timber railroad trestle bridge spanning the Ocheyedan River at z = 150m.
    */
   private buildTrestleBridge(): void {
     const woodMat = this.trackMat(

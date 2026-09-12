@@ -1337,8 +1337,8 @@ export default function Home() {
         <div className="scene-label">
           <span className="scene-dot" />
           <div>
-            <strong>THE HEARTLAND</strong>
-            <small>Summer in Cedar Valley</small>
+            <strong>O'BRIEN COUNTY, IOWA</strong>
+            <small>Hartley · 2920 Yew Ave</small>
           </div>
         </div>
       )}
@@ -2338,13 +2338,31 @@ function drawMap(
   ctx.strokeStyle = '#96a17e';
   ctx.lineWidth = 2;
   for (let i = -3; i <= 3; i++) {
+    const rx = cx + i * 510 + 255;
+    const rz = cz + i * 510 + 255;
     ctx.beginPath();
-    ctx.moveTo(px(cx + i * 510 + 255), 0);
-    ctx.lineTo(px(cx + i * 510 + 255), h);
+    ctx.moveTo(px(rx), 0);
+    ctx.lineTo(px(rx), h);
     ctx.stroke();
     ctx.beginPath();
-    ctx.moveTo(0, pz(cz + i * 510 + 255));
-    ctx.lineTo(w, pz(cz + i * 510 + 255));
+    ctx.moveTo(0, pz(rz));
+    ctx.lineTo(w, pz(rz));
+    ctx.stroke();
+  }
+  // County Road B14 (280th St) paved secondary highway at Z = -1785
+  const b14Z = pz(-1785);
+  if (b14Z >= 0 && b14Z <= h) {
+    ctx.strokeStyle = '#383838';
+    ctx.lineWidth = 3.5;
+    ctx.beginPath();
+    ctx.moveTo(0, b14Z);
+    ctx.lineTo(w, b14Z);
+    ctx.stroke();
+    ctx.strokeStyle = '#facc15';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(0, b14Z);
+    ctx.lineTo(w, b14Z);
     ctx.stroke();
   }
   ctx.strokeStyle = '#6fa0a3';
@@ -2355,6 +2373,66 @@ function drawMap(
     ctx.lineTo(px(x), pz(z));
   }
   ctx.stroke();
+
+  // Geographical labels for O'Brien County section grid
+  if (scale <= 0.16) {
+    ctx.font = 'bold 9px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+
+    // Yew Avenue (X = -255)
+    const yewX = px(-255);
+    if (yewX > 20 && yewX < w - 20) {
+      ctx.save();
+      ctx.fillStyle = 'rgba(235, 240, 220, 0.85)';
+      ctx.translate(yewX - 7, Math.min(Math.max(40, h / 2), h - 40));
+      ctx.rotate(-Math.PI / 2);
+      ctx.fillText('YEW AVE', 0, 0);
+      ctx.restore();
+    }
+
+    // 290th Street (Z = -255)
+    const st290Z = pz(-255);
+    if (st290Z > 15 && st290Z < h - 15) {
+      ctx.fillStyle = 'rgba(235, 240, 220, 0.85)';
+      ctx.fillText('290TH ST', Math.min(Math.max(50, w / 2), w - 50), st290Z - 6);
+    }
+
+    // 300th Street (Z = 255)
+    const st300Z = pz(255);
+    if (st300Z > 15 && st300Z < h - 15) {
+      ctx.fillStyle = 'rgba(235, 240, 220, 0.85)';
+      ctx.fillText('300TH ST', Math.min(Math.max(50, w / 2), w - 50), st300Z + 7);
+    }
+
+    // County Road B14 (Z = -1785)
+    if (b14Z > 15 && b14Z < h - 15) {
+      ctx.fillStyle = 'rgba(250, 204, 21, 0.9)';
+      ctx.fillText('CO RD B14 / 280TH ST', Math.min(Math.max(80, w / 2), w - 80), b14Z - 6);
+    }
+
+    // Ocheyedan River label
+    const rivX = px(980);
+    if (rivX > 25 && rivX < w - 25) {
+      ctx.save();
+      ctx.fillStyle = 'rgba(180, 225, 240, 0.9)';
+      ctx.translate(rivX + 16, Math.min(Math.max(50, h / 2), h - 50));
+      ctx.rotate(Math.PI / 2);
+      ctx.fillText('OCHEYEDAN RIVER', 0, 0);
+      ctx.restore();
+    }
+
+    // 2920 Yew Ave Home Farmstead & Airstrip
+    const hx = px(-315), hz = pz(-195);
+    if (hx > 15 && hx < w - 15 && hz > 15 && hz < h - 15) {
+      ctx.fillStyle = '#ef4444';
+      ctx.beginPath();
+      ctx.arc(hx, hz, 3.5, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = '#ffffff';
+      ctx.fillText('2920 YEW AVE', hx, hz - 8);
+    }
+  }
   ctx.fillStyle = '#c5dd6540';
   polygonPath(sim.job);
   ctx.fill();

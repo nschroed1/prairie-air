@@ -202,6 +202,7 @@ export class World {
   collectiblesGroup = new T.Group();
   collectiblesLayout = '';
   collectibleMeshes: { mesh: T.Group; id: number }[] = [];
+  windsockCone: T.Group | null = null;
   private skyRevealWasActive = false;
   constructor(
     public host: HTMLElement,
@@ -687,11 +688,23 @@ export class World {
     };
     roadMat.customProgramCacheKey = () => 'prairie-gravel-v2';
     const verge = mat('#8d9860');
+    const asphaltMat = mat('#3c3b39', { roughness: 0.85 });
+    const asphaltVerge = mat('#7d8b56');
+    const yellowStripe = mat('#facc15', { roughness: 0.5 });
     for (let n = -6; n <= 6; n++) {
-      this.landPatch(6500, 17, 0, n * 510 + 255, verge, 0.12, 320);
-      this.landPatch(17, 6500, n * 510 + 255, 0, verge, 0.13, 320);
-      this.landPatch(6500, 10, 0, n * 510 + 255, roadMat, 0.2, 320);
-      this.landPatch(10, 6500, n * 510 + 255, 0, roadMat, 0.21, 320);
+      const rz = n * 510 + 255;
+      const rx = n * 510 + 255;
+      // County Road B14 (280th St) at n = -4 (z = -1785m) is a major paved secondary highway
+      if (n === -4) {
+        this.landPatch(6500, 19, 0, rz, asphaltVerge, 0.12, 320);
+        this.landPatch(6500, 11, 0, rz, asphaltMat, 0.22, 320);
+        this.landPatch(6500, 0.35, 0, rz, yellowStripe, 0.23, 320);
+      } else {
+        this.landPatch(6500, 17, 0, rz, verge, 0.12, 320);
+        this.landPatch(6500, 10, 0, rz, roadMat, 0.2, 320);
+      }
+      this.landPatch(17, 6500, rx, 0, verge, 0.13, 320);
+      this.landPatch(10, 6500, rx, 0, roadMat, 0.21, 320);
     }
     const ribbon = (width: number, elevation: number, material: T.Material) => {
       const vertices: number[] = [],
@@ -859,6 +872,50 @@ export class World {
       for (let f = -2; f <= 2; f++)
         this.box(1, 4, 1, white, -70 + f * 14, 2, 48, p);
       this.box(57, 0.7, 0.6, white, -70, 2.8, 48, p);
+      if (farmIndex === 0) {
+        // 2920 Yew Ave Grass Airstrip, Windsock, Refill depot & Mailbox
+        this.landPatch(26, 280, x + 40, z, mat('#4f7435', { roughness: 0.96 }), 0.26, 16);
+        for (let mz = -120; mz <= 120; mz += 40) {
+          this.box(0.6, 0.3, 2.4, white, 28, 0.2, mz, p);
+          this.box(0.6, 0.3, 2.4, white, 52, 0.2, mz, p);
+        }
+        const poleMat = mat('#71717a', { metalness: 0.8, roughness: 0.3 });
+        this.box(0.2, 8.5, 0.2, poleMat, 25, 4.25, -55, p);
+        const windsockGroup = new T.Group();
+        windsockGroup.position.set(25, 8.5, -55);
+        const sockMatOrange = mat('#ea580c', { roughness: 0.8 });
+        const sockMatWhite = mat('#f8fafc', { roughness: 0.8 });
+        const sockSegment = (r1: number, r2: number, len: number, offsetZ: number, sockM: T.Material) => {
+          const coneGeo = new T.CylinderGeometry(r2, r1, len, 8, 1, true);
+          coneGeo.rotateX(Math.PI / 2);
+          const mesh = new T.Mesh(coneGeo, sockM);
+          mesh.position.set(0, 0, offsetZ + len / 2);
+          windsockGroup.add(mesh);
+        };
+        sockSegment(0.55, 0.48, 0.7, 0, sockMatOrange);
+        sockSegment(0.48, 0.41, 0.7, 0.7, sockMatWhite);
+        sockSegment(0.41, 0.34, 0.7, 1.4, sockMatOrange);
+        sockSegment(0.34, 0.27, 0.7, 2.1, sockMatWhite);
+        sockSegment(0.27, 0.18, 0.7, 2.8, sockMatOrange);
+        p.add(windsockGroup);
+        this.windsockCone = windsockGroup;
+
+        const tankMat = mat('#eab308', { metalness: 0.6, roughness: 0.4 });
+        const silverTankMat = mat('#94a3b8', { metalness: 0.8, roughness: 0.3 });
+        const tank1 = new T.Mesh(new T.CylinderGeometry(1.6, 1.6, 4.2, 14), tankMat);
+        tank1.position.set(16, 2.1, -38);
+        tank1.castShadow = true;
+        p.add(tank1);
+        const tank2 = new T.Mesh(new T.CylinderGeometry(1.4, 1.4, 3.8, 14), silverTankMat);
+        tank2.position.set(20, 1.9, -38);
+        tank2.castShadow = true;
+        p.add(tank2);
+
+        const postMat = mat('#451a03');
+        this.box(0.2, 1.4, 0.2, postMat, 58, 0.7, 50, p);
+        this.box(1.8, 0.65, 0.15, white, 58, 1.15, 50, p);
+        this.box(1.6, 0.12, 0.18, mat('#1e293b'), 58, 1.15, 50, p);
+      }
       farmIndex++;
     }
     // Round hay bales and a farm lane add scale during low passes.
@@ -1638,6 +1695,14 @@ export class World {
     this.ruralLife.update(this.time, this.sim.x, this.sim.z, this.sim.altitude);
     this.hazards.update(this.sim, this.guidanceAvailable);
     this.stuntProps?.animateScenery(dt);
+    if (this.windsockCone) {
+      const wind = this.sim.windVector;
+      const speed = Math.hypot(wind.x, wind.z);
+      if (speed > 0.05) {
+        this.windsockCone.rotation.y = Math.atan2(wind.x, wind.z) + Math.PI;
+        this.windsockCone.rotation.x = Math.min(0.65, Math.max(0.08, speed * 0.12));
+      }
+    }
     this.updateMarker();
     this.updateCoverage();
     this.updateGuides();

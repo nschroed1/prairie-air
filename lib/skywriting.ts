@@ -115,7 +115,7 @@ export function skywritingContract<T extends Contract>(
     ...base,
     kind: 'skywriting',
     name: level ? 'Love on the breeze' : 'Wedding wishes',
-    farmer: 'Cedar Valley wedding party',
+    farmer: "O'Brien County wedding party",
     treatment: 'Skywriting smoke',
     acres: 0,
     pay: level ? 1800 : 1400,
