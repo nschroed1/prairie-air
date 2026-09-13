@@ -37,6 +37,7 @@ void test('Wingtip vapor vortices emit only when pulling Gs and trail/fade over 
   const fx = new AircraftFX(scene, plane);
 
   const sim = new Simulation();
+  sim.phase = 'flying';
   // Level flight, moderate speed
   sim.roll = 0.05;
   sim.pitch = 0.05;
@@ -99,6 +100,7 @@ void test('Propeller ground wash kicks up dust and pollen when low and fast, dri
   const fx = new AircraftFX(scene, plane);
 
   const sim = new Simulation();
+  sim.phase = 'flying';
   // High altitude (> 9m)
   sim.y = 200;
   sim.speed = 35;
@@ -145,6 +147,7 @@ void test('Exhaust heat shimmer emits at high throttle and stays idle at low thr
   const fx = new AircraftFX(scene, plane);
 
   const sim = new Simulation();
+  sim.phase = 'flying';
   sim.throttle = 25; // < 36
 
   for (let i = 0; i < 5; i++) {
@@ -171,6 +174,44 @@ void test('Exhaust heat shimmer emits at high throttle and stays idle at low thr
     if (exhaustAlphas.getX(i) > 0) activeExhaust++;
   }
   assert.ok(activeExhaust > 0, 'Exhaust shimmer should emit at throttle > 36');
+
+  fx.dispose();
+});
+
+void test('AircraftFX suppresses all particle emission during ready and paused phases', () => {
+  const scene = new T.Scene();
+  const plane = new T.Group();
+  scene.add(plane);
+  const fx = new AircraftFX(scene, plane);
+
+  const sim = new Simulation();
+  sim.phase = 'ready';
+  sim.speed = 50;
+  sim.roll = 0.5;
+  sim.throttle = 50;
+  sim.y = 2;
+
+  for (let i = 0; i < 10; i++) {
+    fx.update(0.016, sim, i * 0.016);
+  }
+
+  const vortexPoints = scene.getObjectByName('aircraft-fx-vortices') as T.Points;
+  const vortexAlphas = vortexPoints.geometry.getAttribute('fxAlpha') as T.BufferAttribute;
+  for (let i = 0; i < vortexAlphas.count; i++) {
+    assert.equal(vortexAlphas.getX(i), 0, 'No vortices in ready phase');
+  }
+
+  const exhaustPoints = scene.getObjectByName('aircraft-fx-exhaust') as T.Points;
+  const exhaustAlphas = exhaustPoints.geometry.getAttribute('fxAlpha') as T.BufferAttribute;
+  for (let i = 0; i < exhaustAlphas.count; i++) {
+    assert.equal(exhaustAlphas.getX(i), 0, 'No exhaust in ready phase');
+  }
+
+  const dustPoints = scene.getObjectByName('aircraft-fx-dust') as T.Points;
+  const dustAlphas = dustPoints.geometry.getAttribute('fxAlpha') as T.BufferAttribute;
+  for (let i = 0; i < dustAlphas.count; i++) {
+    assert.equal(dustAlphas.getX(i), 0, 'No dust in ready phase');
+  }
 
   fx.dispose();
 });

@@ -312,6 +312,67 @@ export class AircraftFX {
   update(dt: number, sim: Simulation, _time: number): void {
     if (this.disposed || dt <= 0) return;
 
+    // Dynamic streak tier based on sim.arcade?.passStreak ?? 1
+    const streak = sim.arcade?.passStreak ?? 1;
+    const tier = getVaporStreakTier(streak);
+    this.currentTier = tier.streak;
+    this.vortexMaterial.color.setHex(tier.hex);
+    this.vortexMaterial.opacity = tier.opacity;
+    if (tier.streak >= 5) {
+      this.vortexMaterial.blending = T.AdditiveBlending;
+    }
+
+    if (sim.phase === 'ready' || sim.phase === 'paused') {
+      this.hasPrevWingtip = false;
+      this.vortexEmissionAcc = 0;
+      this.dustEmissionAcc = 0;
+      this.exhaustEmissionAcc = 0;
+
+      let needsVortexUpdate = false;
+      for (let i = 0; i < VORTEX_POOL_SIZE; i++) {
+        if (this.vortexPositions[i * 3 + 1] !== -10000 || this.vortexAlphas[i] !== 0) {
+          this.vortexPositions[i * 3 + 1] = -10000;
+          this.vortexAlphas[i] = 0;
+          this.vortexLife[i] = 0;
+          needsVortexUpdate = true;
+        }
+      }
+      if (needsVortexUpdate) {
+        this.vortexGeo.attributes.position.needsUpdate = true;
+        this.vortexGeo.attributes.fxAlpha.needsUpdate = true;
+      }
+
+      let needsExhaustUpdate = false;
+      for (let i = 0; i < EXHAUST_POOL_SIZE; i++) {
+        if (this.exhaustPositions[i * 3 + 1] !== -10000 || this.exhaustAlphas[i] !== 0) {
+          this.exhaustPositions[i * 3 + 1] = -10000;
+          this.exhaustAlphas[i] = 0;
+          this.exhaustLife[i] = 0;
+          needsExhaustUpdate = true;
+        }
+      }
+      if (needsExhaustUpdate) {
+        this.exhaustGeo.attributes.position.needsUpdate = true;
+        this.exhaustGeo.attributes.fxAlpha.needsUpdate = true;
+      }
+
+      let needsDustUpdate = false;
+      for (let i = 0; i < DUST_POOL_SIZE; i++) {
+        if (this.dustPositions[i * 3 + 1] !== -10000 || this.dustAlphas[i] !== 0) {
+          this.dustPositions[i * 3 + 1] = -10000;
+          this.dustAlphas[i] = 0;
+          this.dustLife[i] = 0;
+          needsDustUpdate = true;
+        }
+      }
+      if (needsDustUpdate) {
+        this.dustGeo.attributes.position.needsUpdate = true;
+        this.dustGeo.attributes.fxAlpha.needsUpdate = true;
+      }
+
+      return;
+    }
+
     // Ensure the plane world transform is synchronized
     this.plane.updateMatrixWorld();
 
@@ -338,15 +399,6 @@ export class AircraftFX {
   }
 
   private updateVortices(dt: number, sim: Simulation): void {
-    // Dynamic streak tier based on sim.arcade?.passStreak ?? 1
-    const streak = sim.arcade?.passStreak ?? 1;
-    const tier = getVaporStreakTier(streak);
-    this.currentTier = tier.streak;
-    this.vortexMaterial.color.setHex(tier.hex);
-    this.vortexMaterial.opacity = tier.opacity;
-    if (tier.streak >= 5) {
-      this.vortexMaterial.blending = T.AdditiveBlending;
-    }
 
     // Condition: plane pulling Gs (hard bank, steep pitch, or high speed)
     const pullingGs =

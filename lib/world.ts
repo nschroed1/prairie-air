@@ -434,6 +434,7 @@ export class World {
       this.renderer,
       this.scene,
       this.camera,
+      { bloomStrength: 0.10, bloomRadius: 0.35, bloomThreshold: 1.35 },
     );
     this.stuntGroup.name = 'Stunt World Props';
     this.scene.add(this.stuntGroup);
@@ -446,6 +447,13 @@ export class World {
       .copy(this.plane.position)
       .add(new T.Vector3(27, 16, 39));
     this.hazards = new HazardWorld(this.scene);
+    this.updateWeather(0.016);
+    this.cinematicCamera?.resize(this.host.clientWidth, this.host.clientHeight);
+    if (this.cinematicCamera) {
+      this.cinematicCamera.render(0.016, this.sim, 0, this.nightFactor);
+    } else {
+      this.renderer.render(this.scene, this.camera);
+    }
     this.frame = requestAnimationFrame(this.animate);
   }
   particleTexture() {
@@ -1225,11 +1233,11 @@ export class World {
     const hub = mat('#72857e', { metalness: 0.6, roughness: 0.3 });
     const navRed = new T.MeshBasicMaterial({
       color: '#ff423b',
-      toneMapped: false,
+      toneMapped: true,
     });
     const navGreen = new T.MeshBasicMaterial({
-      color: '#9bef9c',
-      toneMapped: false,
+      color: '#34d399',
+      toneMapped: true,
     });
     for (const side of [-1, 1]) {
       this.box(6.6, 0.07, 0.42, trim, side * 5.1, -0.4, 0.52, this.plane);
@@ -1313,7 +1321,7 @@ export class World {
     // Tail strobe: crisp FAA-style white bulb mesh on rudder tip (zero screen-wide strobe flash!)
     this.tailStrobeMat = new T.MeshBasicMaterial({
       color: '#222222',
-      toneMapped: false,
+      toneMapped: true,
     });
     this.tailStrobeMesh = new T.Mesh(new T.SphereGeometry(0.13, 8, 6), this.tailStrobeMat);
     this.tailStrobeMesh.position.set(0, 2.2, 4.2);
@@ -1331,7 +1339,7 @@ export class World {
     // Glowing cowl headlight bulbs (visible from all camera angles without giant view-blocking cones)
     this.landingBulbMat = new T.MeshBasicMaterial({
       color: '#333333',
-      toneMapped: false,
+      toneMapped: true,
     });
     for (const sx of [-0.65, 0.65]) {
       const bulb = new T.Mesh(new T.SphereGeometry(0.15, 8, 6), this.landingBulbMat);
@@ -2158,7 +2166,7 @@ export class World {
 
     if (this.cinematicCamera) {
       this.cinematicCamera.reducedMotion = this.reducedMotion;
-      this.cinematicCamera.render(dt, this.sim, this.time);
+      this.cinematicCamera.render(dt, this.sim, this.time, this.nightFactor);
     } else {
       this.renderer.render(this.scene, this.camera);
     }

@@ -18,6 +18,11 @@ export class CinematicCamera {
     public renderer: T.WebGLRenderer,
     public scene: T.Scene,
     public camera: T.PerspectiveCamera,
+    public options?: {
+      bloomStrength?: number;
+      bloomRadius?: number;
+      bloomThreshold?: number;
+    },
   ) {
     this.camera.fov = this.baseFov;
     this.camera.updateProjectionMatrix();
@@ -39,7 +44,10 @@ export class CinematicCamera {
       const renderPass = new RenderPass(this.scene, this.camera);
       composer.addPass(renderPass);
 
-      const bloomPass = new UnrealBloomPass(resolution, 0.22, 0.35, 0.86);
+      const bStrength = options?.bloomStrength ?? 0.22;
+      const bRadius = options?.bloomRadius ?? 0.35;
+      const bThreshold = options?.bloomThreshold ?? 0.86;
+      const bloomPass = new UnrealBloomPass(resolution, bStrength, bRadius, bThreshold);
       composer.addPass(bloomPass);
 
       if (this.renderer && 'outputColorSpace' in this.renderer && this.renderer.outputColorSpace) {
@@ -63,7 +71,14 @@ export class CinematicCamera {
     }
   }
 
-  render(dt: number, sim: Simulation, time: number): void {
+  render(dt: number, sim: Simulation, time: number, nightFactor = 0): void {
+    if (this.bloomPass) {
+      const defaultThresh = this.options?.bloomThreshold ?? 1.35;
+      const defaultStrength = this.options?.bloomStrength ?? 0.10;
+      this.bloomPass.threshold = nightFactor > 0.1 ? 0.95 : defaultThresh;
+      this.bloomPass.strength = nightFactor > 0.1 ? 0.16 : defaultStrength;
+    }
+
     // Dynamic Speed FOV
     const targetFov =
       sim.isSkywriting && sim.phase === 'complete'

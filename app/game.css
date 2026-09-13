@@ -38,7 +38,7 @@ button:active:not(:disabled) {
   height: 100svh;
   min-height: 640px;
   overflow: hidden;
-  background: #5e9bb0;
+  background: radial-gradient(ellipse at 50% 30%, #759fac 0%, #3e606a 55%, #18332a 100%);
   color: #f5f5e9;
   font-size: 14px;
   font-weight: 400;
@@ -53,6 +53,15 @@ button:active:not(:disabled) {
   width: 100%;
   height: 100%;
   touch-action: none;
+  animation: canvas-reveal 0.22s ease-out;
+}
+@keyframes canvas-reveal {
+  from {
+    opacity: 0.2;
+  }
+  to {
+    opacity: 1;
+  }
 }
 .screen-shade {
   pointer-events: none;

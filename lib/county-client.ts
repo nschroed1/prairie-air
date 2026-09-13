@@ -24,7 +24,17 @@ export class CountyClient {
     public sim: Simulation,
     public changed: () => void,
     public notify: (message: string) => void,
-  ) {}
+  ) {
+    if (typeof window !== 'undefined') {
+      try {
+        const cached = localStorage.getItem('prairie-air-county-cache-v1');
+        if (cached) {
+          this.snapshot = JSON.parse(cached);
+          this.status = 'County connected';
+        }
+      } catch {}
+    }
+  }
   generation = 0;
   flightGeneration = 0;
   unsubscribeAuth: (() => void) | null = null;
@@ -82,6 +92,11 @@ export class CountyClient {
         return;
       this.snapshot = snapshot;
       this.status = 'County connected';
+      if (typeof window !== 'undefined') {
+        try {
+          localStorage.setItem('prairie-air-county-cache-v1', JSON.stringify(snapshot));
+        } catch {}
+      }
       this.changed();
     } catch {
       this.status = 'County offline · solo practice available';

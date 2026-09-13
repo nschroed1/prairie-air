@@ -420,7 +420,7 @@ export default function Home() {
       world.current.rivalPilotId = race?.rival?.pilot ?? null;
       world.current.setCounty(mode === 'public' ? county : null);
     }
-  }, [county, mode, revision, race?.rival?.callsign, race?.rival?.pilot]);
+  }, [county, mode, race?.rival?.callsign, race?.rival?.pilot]);
   useEffect(() => {
     if (world.current) world.current.guidesEnabled = guideEnabled;
   }, [guideEnabled, ready]);
@@ -476,6 +476,15 @@ export default function Home() {
     }
     save();
   }, [sim, save, localStorm, localChallenge]);
+  const modeRef = useRef(mode);
+  modeRef.current = mode;
+  const countyRef = useRef(county);
+  countyRef.current = county;
+  const onlineActionRef = useRef(onlineAction);
+  onlineActionRef.current = onlineAction;
+  const saveRef = useRef(save);
+  saveRef.current = save;
+
   useEffect(() => {
     let disposed = false;
     import('@/lib/world')
@@ -488,6 +497,9 @@ export default function Home() {
           world.current.rivalCallsign = rivalCallsignRef.current;
           world.current.rivalPilotId = rivalPilotIdRef.current;
           world.current.setNightMode(nightModeRef.current, true);
+          if (modeRef.current === 'public' && countyRef.current) {
+            world.current.setCounty(countyRef.current);
+          }
           world.current.onRemoteProximity = (dist, speed, pan) => {
             soundRef.current.updateRemoteProximity(dist, speed, pan);
           };
@@ -529,8 +541,8 @@ export default function Home() {
                 if (rTrigger || aButton) controls.current.spray = true;
 
                 if (gp.buttons[3]?.pressed && !prevGamepadButtons.current[3]) {
-                  if (mode === 'public')
-                    void onlineAction(
+                  if (modeRef.current === 'public')
+                    void onlineActionRef.current(
                       sim.phase === 'flying' ? 'pause' : 'resume',
                     );
                   else sim.phase = sim.phase === 'flying' ? 'paused' : 'flying';
@@ -547,10 +559,10 @@ export default function Home() {
                   !prevGamepadButtons.current[1] &&
                   sim.phase === 'flying'
                 ) {
-                  if (mode === 'public') void onlineAction('refill');
+                  if (modeRef.current === 'public') void onlineActionRef.current('refill');
                   else {
                     sim.refill();
-                    save();
+                    saveRef.current();
                   }
                 }
                 prevGamepadButtons.current[0] = Boolean(gp.buttons[0]?.pressed);
@@ -584,7 +596,7 @@ export default function Home() {
       clearInterval(timer);
       world.current?.dispose();
     };
-  }, [sim, client, mode, onlineAction, save]);
+  }, [sim, client]);
   useEffect(() => {
     if (!ready) return;
     if (mode === 'public')
