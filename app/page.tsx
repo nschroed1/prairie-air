@@ -418,7 +418,13 @@ export default function Home() {
     if (world.current) {
       world.current.rivalCallsign = race?.rival?.callsign ?? null;
       world.current.rivalPilotId = race?.rival?.pilot ?? null;
-      world.current.setCounty(mode === 'public' ? county : null);
+      world.current.setCounty(
+        mode === 'public'
+          ? county
+          : county
+            ? { ...county, pilots: [] }
+            : null,
+      );
     }
   }, [county, mode, race?.rival?.callsign, race?.rival?.pilot]);
   useEffect(() => {

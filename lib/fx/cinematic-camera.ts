@@ -12,6 +12,7 @@ export class CinematicCamera {
   outputPass: OutputPass | null = null;
   baseFov: number = 50;
   enabled: boolean = true;
+  usePostProcessing: boolean = false;
   reducedMotion = false;
 
   constructor(
@@ -22,8 +23,10 @@ export class CinematicCamera {
       bloomStrength?: number;
       bloomRadius?: number;
       bloomThreshold?: number;
+      usePostProcessing?: boolean;
     },
   ) {
+    this.usePostProcessing = options?.usePostProcessing ?? false;
     this.camera.fov = this.baseFov;
     this.camera.updateProjectionMatrix();
 
@@ -41,6 +44,8 @@ export class CinematicCamera {
       });
 
       const composer = new EffectComposer(this.renderer, renderTarget);
+      const pixelRatio = this.renderer.getPixelRatio ? this.renderer.getPixelRatio() : 1;
+      composer.setPixelRatio(pixelRatio);
       const renderPass = new RenderPass(this.scene, this.camera);
       composer.addPass(renderPass);
 
@@ -95,8 +100,9 @@ export class CinematicCamera {
       this.camera.position.y += Math.sin(time * 50) * 0.035;
     }
 
-    // Render using composer or fallback to standard WebGLRenderer
-    if (this.enabled && this.composer) {
+    // Direct WebGL rendering provides native hardware MSAA and ACESFilmic tone mapping
+    // without the periodic ANGLE/Metal resolve drops or bloom flickering of EffectComposer.
+    if (this.usePostProcessing && this.enabled && this.composer) {
       try {
         this.composer.render();
       } catch (error) {
@@ -114,6 +120,8 @@ export class CinematicCamera {
 
   resize(width: number, height: number): void {
     if (this.composer) {
+      const pixelRatio = this.renderer.getPixelRatio ? this.renderer.getPixelRatio() : 1;
+      this.composer.setPixelRatio(pixelRatio);
       this.composer.setSize(width, height);
     }
     if (this.bloomPass) {
