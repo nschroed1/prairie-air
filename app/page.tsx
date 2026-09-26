@@ -164,6 +164,10 @@ export default function Home() {
     [error, setError] = useState(''),
     [panel, setPanel] = useState<Panel>(null);
   const [notice, setNotice] = useState('');
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => {
+    setMounted(true);
+  }, []);
   useEffect(() => {
     if (!notice) return;
     const timer = setTimeout(() => setNotice(''), 7000);
@@ -1123,8 +1127,10 @@ export default function Home() {
             {mode === 'public' ? 'County' : 'Contracts'}{' '}
             <span className="nav-count">
               {mode === 'public'
-                ? (county?.jobs.filter((j) => j.status === 'open').length ??
-                  '—')
+                ? (mounted && county
+                    ? (county.jobs.filter((j) => j.status === 'open').length ??
+                      '—')
+                    : '—')
                 : 3}
             </span>
           </button>
@@ -1155,7 +1161,7 @@ export default function Home() {
             <Crown size={16} />
             Hall of Fame{' '}
             <span className="nav-count">
-              {achievementManager.unlockedCount} / {achievementManager.getAllDefs().length}
+              {mounted ? achievementManager.unlockedCount : 0} / {achievementManager.getAllDefs().length}
             </span>
           </button>
         </nav>
@@ -1189,7 +1195,7 @@ export default function Home() {
           ? localStorm
             ? 'STORM PRACTICE · LOCAL'
             : 'SOLO PRACTICE'
-          : county
+          : mounted && county
             ? `SEASON ${county.season.number} · ${county.season.phase.toUpperCase()} · ${county.pilots.length} PILOTS`
             : 'CONNECTING TO COUNTY'}
         <span className="live-dot" />

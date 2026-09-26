@@ -24,17 +24,7 @@ export class CountyClient {
     public sim: Simulation,
     public changed: () => void,
     public notify: (message: string) => void,
-  ) {
-    if (typeof window !== 'undefined') {
-      try {
-        const cached = localStorage.getItem('prairie-air-county-cache-v1');
-        if (cached) {
-          this.snapshot = JSON.parse(cached);
-          this.status = 'County connected';
-        }
-      } catch {}
-    }
-  }
+  ) {}
   generation = 0;
   flightGeneration = 0;
   unsubscribeAuth: (() => void) | null = null;
@@ -42,6 +32,16 @@ export class CountyClient {
   async start() {
     this.disposed = false;
     const generation = ++this.generation;
+    if (typeof window !== 'undefined' && !this.snapshot) {
+      try {
+        const cached = localStorage.getItem('prairie-air-county-cache-v1');
+        if (cached) {
+          this.snapshot = JSON.parse(cached);
+          this.status = 'County connected';
+          this.changed();
+        }
+      } catch {}
+    }
     try {
       const auth = await browserAuth();
       if (this.disposed || generation !== this.generation) return;
