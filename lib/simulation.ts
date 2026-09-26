@@ -602,6 +602,17 @@ export class Simulation {
       this.stunts.resetPosition();
       return;
     }
+    if (this.isFirefighting) {
+      // Line up heading North directly on the burning Cedar Valley timber ridge!
+      this.heading = 0;
+      this.x = -360;
+      this.z = 460;
+      this.y = ground(this.x, this.z) + 30;
+      this.roll = this.pitch = 0;
+      this.speed = this.throttle = 36;
+      this.stunts.resetPosition();
+      return;
+    }
     this.x =
       this.job.x -
       (this.job.width

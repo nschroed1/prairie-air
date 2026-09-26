@@ -2039,7 +2039,7 @@ export class World {
           this.sim.firefightingState,
         );
       }
-      this.firefightingWorld.update(dt, this.sim, this.time);
+      this.firefightingWorld.update(dt, this.sim, this.time, this.camera);
     } else if (this.firefightingWorld) {
       this.firefightingWorld.dispose();
       this.firefightingWorld = null;

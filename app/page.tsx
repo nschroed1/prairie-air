@@ -1660,6 +1660,7 @@ export default function Home() {
                 state={sim.firefightingState}
                 spraying={sim.spraying}
                 altitude={sim.altitude}
+                sim={sim}
               />
               <SmokeVignetteOverlay
                 smokeExposure={sim.firefightingState.smokeExposure ?? 0}
