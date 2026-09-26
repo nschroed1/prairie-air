@@ -1,4 +1,5 @@
 import { type Contract, fieldCellCount } from './simulation';
+import { achievementManager } from './achievements';
 
 export interface TandemState {
   myCoverage: number;
@@ -125,6 +126,7 @@ export class TandemAiPartner {
     sim.inFormation = distToPlayer >= 22 && distToPlayer <= 55 && Math.abs(this.y - sim.y) < 12;
     if (sim.inFormation) {
       sim.formationSeconds = (sim.formationSeconds ?? 0) + dt;
+      achievementManager.addProgress('tandem_wingman', dt);
     }
 
     if (this.spraying) {

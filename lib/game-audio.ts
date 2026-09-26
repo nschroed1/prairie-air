@@ -297,6 +297,24 @@ type Layer = {
 };
 type Tone = { osc: OscillatorNode; gain: GainNode };
 
+export function triggerHaptic(
+  type: 'stunt' | 'stall' | 'touchdown' | 'near-miss' | 'crash' | null,
+): void {
+  if (
+    !type ||
+    typeof navigator === 'undefined' ||
+    typeof navigator.vibrate !== 'function'
+  )
+    return;
+  try {
+    if (type === 'near-miss') navigator.vibrate([40, 30, 40]);
+    else if (type === 'stall') navigator.vibrate([60, 40, 60]);
+    else if (type === 'stunt') navigator.vibrate([30, 25, 80]);
+    else if (type === 'touchdown') navigator.vibrate(50);
+    else if (type === 'crash') navigator.vibrate([100, 50, 150]);
+  } catch {}
+}
+
 // One audio graph per page. All sources are quiet until an explicit user
 // gesture unlocks the context; volumes ramp to avoid clicks on pause/mute.
 export class GameAudio {
@@ -328,13 +346,21 @@ export class GameAudio {
   private remoteEngineGain: GainNode;
   private remoteEngineOsc: OscillatorNode;
   private remoteEnginePan?: StereoPannerNode;
+  private compressor: DynamicsCompressorNode;
+  private streamDestination?: MediaStreamAudioDestinationNode;
+  private stallHornOsc: OscillatorNode;
+  private stallHornGain: GainNode;
+  private diveRoarFilter: BiquadFilterNode;
+  private diveRoarGain: GainNode;
+  private diveRoarOsc: OscillatorNode;
 
   constructor() {
     this.context = new AudioContext();
     const ctx = this.context;
     this.master = ctx.createGain();
     this.master.gain.value = 0;
-    const compressor = ctx.createDynamicsCompressor();
+    this.compressor = ctx.createDynamicsCompressor();
+    const compressor = this.compressor;
     compressor.threshold.value = -12;
     compressor.knee.value = 12;
     compressor.ratio.value = 4;
@@ -346,6 +372,30 @@ export class GameAudio {
     this.music = ctx.createGain();
     this.music.gain.value = 0;
     this.music.connect(this.master);
+
+    this.stallHornOsc = ctx.createOscillator();
+    this.stallHornOsc.type = 'sawtooth';
+    this.stallHornOsc.frequency.value = 760;
+    this.stallHornGain = ctx.createGain();
+    this.stallHornGain.gain.value = 0;
+    this.stallHornOsc.connect(this.stallHornGain).connect(this.effects);
+    this.stallHornOsc.start();
+    this.sources.push(this.stallHornOsc);
+
+    this.diveRoarFilter = ctx.createBiquadFilter();
+    this.diveRoarFilter.type = 'lowpass';
+    this.diveRoarFilter.frequency.value = 85;
+    this.diveRoarGain = ctx.createGain();
+    this.diveRoarGain.gain.value = 0;
+    this.diveRoarOsc = ctx.createOscillator();
+    this.diveRoarOsc.type = 'triangle';
+    this.diveRoarOsc.frequency.value = 46;
+    this.diveRoarOsc
+      .connect(this.diveRoarFilter)
+      .connect(this.diveRoarGain)
+      .connect(this.effects);
+    this.diveRoarOsc.start();
+    this.sources.push(this.diveRoarOsc);
 
     this.deckHumFilter = ctx.createBiquadFilter();
     this.deckHumFilter.type = 'bandpass';
@@ -552,6 +602,22 @@ export class GameAudio {
     ramp(this.wind.pan.pan, frame.pan, 0.6);
     ramp(this.spray.gain.gain, flying && frame.spraying ? 0.17 : 0, 0.035);
     ramp(this.rain.gain.gain, flying ? clamp(frame.rain, 0, 1) * 0.17 : 0, 0.5);
+
+    // High-speed aerodynamic dive roar (>42 m/s / ~94 mph)
+    const diveRatio =
+      flying && frame.speed > 42 ? clamp((frame.speed - 42) / 24, 0, 1) : 0;
+    ramp(this.diveRoarGain.gain, diveRatio * 0.14, 0.08);
+    ramp(this.diveRoarFilter.frequency, 85 + diveRatio * 180, 0.08);
+
+    // Stall horn warning below 25.5 m/s (~57 mph) while airborne
+    const stalling = flying && frame.speed < 25.5 && frame.altitude > 4;
+    const stallBeep =
+      stalling && Math.sin(ctx.currentTime * 28) > 0 ? 0.07 : 0;
+    ramp(this.stallHornGain.gain, stallBeep, 0.02);
+    if (stalling && Math.random() < 0.04) {
+      triggerHaptic('stall');
+    }
+
     if (effectsOn) {
       this.playDeckHum(flying && Boolean(frame.deckSkimming));
       for (const cue of this.tracker.update(frame, ctx.currentTime))
@@ -559,6 +625,16 @@ export class GameAudio {
     } else {
       this.playDeckHum(false);
     }
+  }
+
+  getStreamDestination(): MediaStreamAudioDestinationNode | null {
+    if (typeof this.context.createMediaStreamDestination !== 'function')
+      return null;
+    if (!this.streamDestination) {
+      this.streamDestination = this.context.createMediaStreamDestination();
+      this.compressor.connect(this.streamDestination);
+    }
+    return this.streamDestination;
   }
 
   playSprayPop() {
@@ -784,6 +860,19 @@ export class GameAudio {
       this.context.state !== 'running'
     )
       return;
+
+    triggerHaptic(
+      cue === 'near-miss'
+        ? 'near-miss'
+        : cue === 'crash'
+          ? 'crash'
+          : cue === 'barnstormer' ||
+              cue === 'inverted-barnstormer' ||
+              cue === 'trestle-runner' ||
+              cue === 'wire-skimmer'
+            ? 'stunt'
+            : null,
+    );
 
     if (cue === 'spray-pop' || cue === 'flow-tick') {
       this.playSprayPop();

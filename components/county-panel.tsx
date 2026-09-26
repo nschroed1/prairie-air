@@ -43,6 +43,7 @@ export function CountyPanel({
   startRally,
   startDustOff,
   startTandem,
+  startFirefighting,
   initialTab = 'fields',
   pending,
   rivalId,
@@ -57,6 +58,7 @@ export function CountyPanel({
   startRally?: () => void;
   startDustOff?: () => void;
   startTandem?: () => void;
+  startFirefighting?: () => void;
   initialTab?: string;
   pending: boolean;
   rivalId: string | null;
@@ -185,6 +187,15 @@ export function CountyPanel({
         {startTandem && (
           <button className="secondary" onClick={startTandem} disabled={pending}>
             Tandem co-op
+          </button>
+        )}
+        {startFirefighting && (
+          <button
+            className="secondary"
+            onClick={startFirefighting}
+            disabled={pending}
+          >
+            Air tanker wildfire
           </button>
         )}
         <button className="secondary" onClick={freeFlight} disabled={pending}>

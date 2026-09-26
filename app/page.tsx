@@ -29,6 +29,10 @@ import {
   Globe,
   ArrowUpDown,
   Wind,
+  Video,
+  Flame,
+  Crown,
+  Medal,
 } from 'lucide-react';
 import {
   Dialog,
@@ -118,6 +122,12 @@ import { tandemContract, TandemAiPartner } from '@/lib/tandem';
 import { DustOffHud } from '@/components/dust-off-hud';
 import { RallyHud } from '@/components/rally-hud';
 import { TandemHud } from '@/components/tandem-hud';
+import { firefightingContract } from '@/lib/firefighting';
+import { FirefightingHud } from '@/components/firefighting-hud';
+import { FlightVideoRecorder } from '@/lib/video-recorder';
+import { achievementManager } from '@/lib/achievements';
+import { HallOfFameModal } from '@/components/hall-of-fame-modal';
+import { AchievementToastContainer } from '@/components/achievement-toast';
 
 const money = (n: number) => '$' + Math.round(n).toLocaleString('en-US');
 type Panel =
@@ -127,6 +137,7 @@ type Panel =
   | 'help'
   | 'county'
   | 'standings'
+  | 'hall_of_fame'
   | null;
 
 export default function Home() {
@@ -144,6 +155,10 @@ export default function Home() {
   const reducedMotionRef = useRef(false);
   const invertPitchRef = useRef(false);
   const briefingTitle = useRef<HTMLHeadingElement>(null);
+  const recorder = useRef<FlightVideoRecorder | null>(null);
+  const [isRecording, setIsRecording] = useState(false);
+  const [recordSeconds, setRecordSeconds] = useState(0);
+  const [cameraMode, setCameraMode] = useState(0);
   const [revision, refresh] = useState(0),
     [ready, setReady] = useState(false),
     [error, setError] = useState(''),
@@ -253,6 +268,57 @@ export default function Home() {
   useEffect(() => {
     soundRef.current = sound;
   }, [sound]);
+
+  useEffect(() => {
+    recorder.current = new FlightVideoRecorder({
+      onStateChange: (state, elapsedMs) => {
+        setIsRecording(state === 'recording');
+        setRecordSeconds(Math.floor(elapsedMs / 1000));
+      },
+    });
+    return () => {
+      recorder.current?.dispose();
+      recorder.current = null;
+    };
+  }, []);
+
+  const toggleRecording = useCallback(async () => {
+    if (!recorder.current || !world.current) return;
+    if (recorder.current.isRecording()) {
+      setNotice('Finalizing highlight reel...');
+      const blob = await recorder.current.stop();
+      if (blob) {
+        recorder.current.downloadLatestClip();
+        setNotice('Highlight clip saved to your Downloads!');
+      }
+    } else {
+      const canvas = world.current.renderer.domElement;
+      const audioStream = soundRef.current.getAudioStream?.();
+      const started = recorder.current.start(canvas, audioStream, 30);
+      if (started) {
+        achievementManager.unlock('recorder_reel');
+        setNotice('Recording highlight reel (30s max · press V to finish)');
+      } else {
+        setNotice('Video recording is not supported in this browser.');
+      }
+    }
+  }, []);
+
+  const cycleCamera = useCallback(() => {
+    if (world.current) {
+      const next = (world.current.cameraMode + 1) % 4;
+      world.current.cameraMode = next;
+      setCameraMode(next);
+      achievementManager.recordCameraVisit(next);
+      const names = [
+        'Chase Cam',
+        'Cockpit View',
+        'Wingtip Boom Cam',
+        'Flyby Spectator Cam',
+      ];
+      setNotice(`Camera: ${names[next]} (C)`);
+    }
+  }, [sim.career]);
   const { cue: playSound } = sound;
   const publicPreferences = useCareerPreferences(
     `pilot:${county?.viewerId ?? 'guest'}`,
@@ -656,8 +722,15 @@ export default function Home() {
         } else if (sim.phase === 'flying') sim.phase = 'paused';
         else if (sim.phase === 'paused') sim.phase = 'flying';
       }
-      if (e.code === 'KeyC' && world.current)
-        world.current.cameraMode = 1 - world.current.cameraMode;
+      if (e.code === 'KeyC') {
+        cycleCamera();
+      }
+      if (e.code === 'KeyV') {
+        void toggleRecording();
+      }
+      if (e.code === 'KeyH') {
+        setPanel((p) => (p === 'hall_of_fame' ? null : 'hall_of_fame'));
+      }
       if (e.code === 'KeyR' && sim.phase === 'flying') {
         if (mode === 'public') void onlineAction('refill');
         else {
@@ -712,6 +785,8 @@ export default function Home() {
     invertPitch,
     toggleMapZoom,
     toggleNightMode,
+    cycleCamera,
+    toggleRecording,
   ]);
   useEffect(() => {
     drawMap(
@@ -908,6 +983,20 @@ export default function Home() {
     Object.assign(manualControls.current, freshControls());
     refresh((v) => v + 1);
   };
+  const startFirefighting = () => {
+    client.disconnect();
+    const base = contracts[0];
+    const job = firefightingContract({ ...base, id: 9904 });
+    sim.reset(job);
+    sim.phase = 'paused';
+    setLocalStorm(false);
+    setLocalChallenge(false);
+    setMode('practice');
+    setPanel('briefing');
+    Object.assign(controls.current, freshControls());
+    Object.assign(manualControls.current, freshControls());
+    refresh((v) => v + 1);
+  };
   const endSkyPractice = () => {
     skyPractice.current.end(sim);
     sim.weatherLocked = false;
@@ -999,6 +1088,13 @@ export default function Home() {
     >
       <div ref={mount} className="world-canvas" />
       <div className="screen-shade" />
+      <AchievementToastContainer
+        onSoundCue={(cue) => {
+          try {
+            sound.cue?.(cue);
+          } catch {}
+        }}
+      />
       <header className="topbar">
         <a className="brand" href="/" aria-label="Prairie Air home">
           <span className="brand-icon">
@@ -1051,6 +1147,16 @@ export default function Home() {
           >
             <Trophy size={16} />
             Standings
+          </button>
+          <button
+            className={panel === 'hall_of_fame' ? 'nav-active' : ''}
+            onClick={() => open('hall_of_fame')}
+          >
+            <Crown size={16} />
+            Hall of Fame{' '}
+            <span className="nav-count">
+              {achievementManager.unlockedCount} / {achievementManager.getAllDefs().length}
+            </span>
           </button>
         </nav>
         <div className="wallet">
@@ -1548,6 +1654,74 @@ export default function Home() {
           <DustOffHud sim={sim} />
           <RallyHud sim={sim} />
           <TandemHud sim={sim} />
+          {sim.isFirefighting && sim.firefightingState && (
+            <FirefightingHud
+              state={sim.firefightingState}
+              spraying={sim.spraying}
+              altitude={sim.altitude}
+            />
+          )}
+          {cameraMode === 1 && (
+            <div
+              style={{
+                position: 'absolute',
+                top: '50%',
+                left: '50%',
+                transform: 'translate(-50%, -50%)',
+                pointerEvents: 'none',
+                zIndex: 15,
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                gap: '8px',
+              }}
+            >
+              <div
+                style={{
+                  width: '64px',
+                  height: '64px',
+                  border: '1.5px solid rgba(255, 255, 255, 0.4)',
+                  borderRadius: '50%',
+                  position: 'relative',
+                }}
+              >
+                <div
+                  style={{
+                    position: 'absolute',
+                    top: '31px',
+                    left: '12px',
+                    right: '12px',
+                    height: '1.5px',
+                    background: 'rgba(255, 255, 255, 0.7)',
+                  }}
+                />
+                <div
+                  style={{
+                    position: 'absolute',
+                    top: '12px',
+                    bottom: '12px',
+                    left: '31px',
+                    width: '1.5px',
+                    background: 'rgba(255, 255, 255, 0.7)',
+                  }}
+                />
+              </div>
+              <div
+                style={{
+                  fontSize: '11px',
+                  fontFamily: 'monospace',
+                  background: 'rgba(0, 0, 0, 0.65)',
+                  padding: '3px 8px',
+                  borderRadius: '4px',
+                  color: '#e4e4e7',
+                  border: '1px solid rgba(255, 255, 255, 0.2)',
+                }}
+              >
+                COCKPIT · {Math.round(sim.speed * 2.23694)} MPH ·{' '}
+                {Math.round(sim.altitude * 3.28084)} FT AGL
+              </div>
+            </div>
+          )}
         </>
       )}
       <div className="bottom-hud">
@@ -1562,6 +1736,9 @@ export default function Home() {
           </span>
           <span>
             <kbd>SPACE</kbd> {sim.isSkywriting ? 'Smoke' : 'Spray'}
+          </span>
+          <span>
+            <kbd>V</kbd> Reel
           </span>
           <button
             onClick={toggleNightMode}
@@ -1717,13 +1894,41 @@ export default function Home() {
             </button>
           )}
           <button
-            onClick={() => {
-              if (world.current)
-                world.current.cameraMode = 1 - world.current.cameraMode;
-            }}
-            title="Change camera (C)"
+            onClick={cycleCamera}
+            title={`Camera: ${['Chase Cam', 'Cockpit View', 'Wing Cam', 'Flyby Cam'][cameraMode]} (C)`}
           >
             <Crosshair size={17} />
+          </button>
+          <button
+            onClick={() => void toggleRecording()}
+            title={
+              isRecording
+                ? `Recording: ${recordSeconds}s · Click to stop & save clip (V)`
+                : 'Record Highlight Reel (V)'
+            }
+            style={
+              isRecording
+                ? {
+                    background: 'rgba(239, 68, 68, 0.35)',
+                    border: '1px solid #ef4444',
+                    color: '#fca5a5',
+                  }
+                : undefined
+            }
+          >
+            <Video size={17} />
+            {isRecording && (
+              <span
+                style={{
+                  fontSize: '11px',
+                  fontWeight: 700,
+                  marginLeft: '4px',
+                  color: '#fee2e2',
+                }}
+              >
+                {recordSeconds}s
+              </span>
+            )}
           </button>
           <button
             onClick={() => {
@@ -1964,6 +2169,7 @@ export default function Home() {
             }}
             onHangar={() => open('hangar')}
             onReplay={() => start(sim.job)}
+            onHallOfFame={() => open('hall_of_fame')}
             progression={
               <div className="debrief-goals">
                 <UpgradeGoal
@@ -1997,24 +2203,28 @@ export default function Home() {
           >
             {panel === 'briefing'
               ? sim.job.name
-              : panel === 'county' || panel === 'standings'
-                ? 'The heartland, together.'
-                : panel === 'contracts'
-                  ? 'Good work, waiting for you.'
-                  : panel === 'hangar'
-                    ? 'Make this bird your own.'
-                    : 'A feel for the flying.'}
+              : panel === 'hall_of_fame'
+                ? 'Prairie Aviation Hall of Fame'
+                : panel === 'county' || panel === 'standings'
+                  ? 'The heartland, together.'
+                  : panel === 'contracts'
+                    ? 'Good work, waiting for you.'
+                    : panel === 'hangar'
+                      ? 'Make this bird your own.'
+                      : 'A feel for the flying.'}
           </DialogTitle>
           <DialogDescription>
             {panel === 'briefing'
               ? `${sim.job.farmer} · ${sim.isSkywriting ? 'Skywriting' : `${sim.job.crop} · ${sim.job.treatment}`}`
-              : panel === 'county' || panel === 'standings'
-                ? 'A shared sky. A finite season. Your name on the board.'
-                : panel === 'contracts'
-                  ? 'Local farms, flight practice, and an occasional celebration.'
-                  : panel === 'hangar'
-                    ? `Your crop duster · ${money(career.cash)} available`
-                    : 'A few simple controls. Plenty of room to get better.'}
+              : panel === 'hall_of_fame'
+                ? 'All-time Iowa aviation records, historic pioneer plaques, and pilot achievements.'
+                : panel === 'county' || panel === 'standings'
+                  ? 'A shared sky. A finite season. Your name on the board.'
+                  : panel === 'contracts'
+                    ? 'Local farms, flight practice, and an occasional celebration.'
+                    : panel === 'hangar'
+                      ? `Your crop duster · ${money(career.cash)} available`
+                      : 'A few simple controls. Plenty of room to get better.'}
           </DialogDescription>
           {panel === 'briefing' &&
             (sim.isSkywriting ? (
@@ -2059,6 +2269,7 @@ export default function Home() {
                 startRally={startRally}
                 startDustOff={startDustOff}
                 startTandem={startTandem}
+                startFirefighting={startFirefighting}
                 rename={(name) => {
                   void client.action('rename', { callsign: name });
                 }}
@@ -2232,6 +2443,55 @@ export default function Home() {
                   Exit skywriting practice
                 </button>
               )}
+              <div
+                style={{
+                  background: 'rgba(249, 115, 22, 0.08)',
+                  border: '1px solid rgba(249, 115, 22, 0.3)',
+                  borderRadius: '12px',
+                  padding: '16px',
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  marginBottom: '12px',
+                }}
+              >
+                <div>
+                  <div
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '8px',
+                      color: '#fb923c',
+                      fontWeight: 700,
+                      fontSize: '14px',
+                    }}
+                  >
+                    <Flame size={16} /> Air Tanker Wildfire Challenge
+                  </div>
+                  <p
+                    style={{
+                      margin: '4px 0 0',
+                      fontSize: '12px',
+                      color: '#a1a1aa',
+                    }}
+                  >
+                    Drop red fire-retardant payload on Cedar Valley timber
+                    brushfires. Skim the Cedar River to scoop water refills.
+                  </p>
+                </div>
+                <button
+                  className="primary"
+                  onClick={startFirefighting}
+                  style={{
+                    background: '#ea580c',
+                    borderColor: '#f97316',
+                    whiteSpace: 'nowrap',
+                    marginLeft: '16px',
+                  }}
+                >
+                  Scramble Tanker <ArrowUpRight size={15} />
+                </button>
+              </div>
               {contracts.map((job, i) => (
                 <article className="contract-row" key={job.id}>
                   <div className="contract-preview">
@@ -2282,6 +2542,24 @@ export default function Home() {
               }
             />
           )}
+          {panel === 'hall_of_fame' && (
+            <HallOfFameModal
+              career={career}
+              onClose={() => setPanel(null)}
+              onClaimCash={(amount) => {
+                if (mode === 'practice') {
+                  sim.career.cash += amount;
+                  sim.career.totalEarned += amount;
+                  save();
+                } else if (county?.player) {
+                  county.player.flight.career.cash += amount;
+                  county.player.flight.career.totalEarned += amount;
+                }
+                sound.cue?.('cash-register');
+                refresh((v) => v + 1);
+              }}
+            />
+          )}
           {panel === 'help' && (
             <div className="help-content">
               <div className="key-grid">
@@ -2298,7 +2576,9 @@ export default function Home() {
                     sim.isSkywriting ? 'Hold to write smoke' : 'Hold to spray',
                   ],
                   ['SHIFT / CTRL', 'Faster / slower'],
-                  ['C', 'Change camera'],
+                  ['C', 'Change camera (4 modes)'],
+                  ['V', 'Record flight highlight video'],
+                  ['H', 'Prairie Hall of Fame & Badges'],
                   ['N', 'Toggle day / night flight mode'],
                   ['P / ESC', 'Pause'],
                   ['R', 'Refill & return to field'],

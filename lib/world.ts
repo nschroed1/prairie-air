@@ -2,6 +2,7 @@ import { farmRotation } from './landmark-data';
 import { HazardWorld } from './hazard-world';
 import { SkywritingWorld } from './skywriting-world';
 import { RallyWorld } from './rally-world';
+import { FirefightingWorld } from './firefighting-world';
 import { skyAudienceView } from './skywriting';
 import * as T from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
@@ -144,6 +145,7 @@ export class World {
   rivalCoverageMesh: T.Mesh<T.BufferGeometry, T.MeshBasicMaterial>;
   coverageLineMesh: T.LineSegments<T.BufferGeometry, T.LineBasicMaterial>;
   rallyWorld: RallyWorld;
+  firefightingWorld: FirefightingWorld | null = null;
   coverageTiles = new Map<number, number[]>();
   coverageLineTiles = new Map<number, number[]>();
   particles: T.Points;
@@ -1854,15 +1856,55 @@ export class World {
     this.updateCollectibles(dt);
     this.prop.rotation.z += dt * 70;
     const preview = this.sim.phase === 'ready';
-    const offset =
-      this.cameraMode === 1
-        ? new T.Vector3(0, 3.4, 1)
-        : preview
-          ? new T.Vector3(24 + Math.sin(this.time * 0.07) * 5, 12, 33)
-          : new T.Vector3(0, 8.5, 30);
-    offset.applyAxisAngle(Y, -this.sim.heading);
+    let offset: T.Vector3;
+    let look: T.Vector3;
+    let smoothing = preview ? 0.7 : 3.0;
+
+    if (this.cameraMode === 1) {
+      // Cockpit / Nose View
+      offset = new T.Vector3(0, 3.4, 1);
+      offset.applyAxisAngle(Y, -this.sim.heading);
+      look = new T.Vector3(
+        Math.sin(this.sim.heading) * 60,
+        2,
+        -Math.cos(this.sim.heading) * 60,
+      ).add(this.plane.position);
+      smoothing = 14.0;
+    } else if (this.cameraMode === 2) {
+      // Wingtip / Spray Boom Action Cam
+      offset = new T.Vector3(-9.6, 0.75, -0.6);
+      offset.applyAxisAngle(Y, -this.sim.heading);
+      look = new T.Vector3(
+        Math.sin(this.sim.heading) * 45 + Math.cos(this.sim.heading) * 8,
+        -2,
+        -Math.cos(this.sim.heading) * 45 + Math.sin(this.sim.heading) * 8,
+      ).add(this.plane.position);
+      smoothing = 6.0;
+    } else if (this.cameraMode === 3) {
+      // Flyby Spectator Cam
+      const orbitAngle = this.sim.heading + 0.45;
+      offset = new T.Vector3(
+        Math.sin(orbitAngle) * 58,
+        14,
+        -Math.cos(orbitAngle) * 58,
+      );
+      look = this.plane.position.clone().add(new T.Vector3(0, 1.5, 0));
+      smoothing = 1.4;
+    } else {
+      // Mode 0: Chase Cam
+      offset = preview
+        ? new T.Vector3(24 + Math.sin(this.time * 0.07) * 5, 12, 33)
+        : new T.Vector3(0, 8.5, 30);
+      offset.applyAxisAngle(Y, -this.sim.heading);
+      look = new T.Vector3(
+        Math.sin(this.sim.heading) * 50,
+        -5,
+        -Math.cos(this.sim.heading) * 50,
+      ).add(this.plane.position);
+      smoothing = preview ? 0.7 : 3.0;
+    }
+
     const desired = this.plane.position.clone().add(offset);
-    const smoothing = preview ? 0.7 : 3.0;
     const teleported =
       this.skyRevealWasActive ||
       this.lastCameraPlane.distanceTo(this.plane.position) > 80;
@@ -1888,11 +1930,6 @@ export class World {
         }
       }
     }
-    const look = new T.Vector3(
-      Math.sin(this.sim.heading) * 50,
-      this.cameraMode === 1 ? 2 : -5,
-      -Math.cos(this.sim.heading) * 50,
-    ).add(this.plane.position);
     if (preview)
       look.copy(this.plane.position).add(new T.Vector3(-70, -12, -80));
     this.camera.up.set(0, 1, 0);
@@ -1917,12 +1954,17 @@ export class World {
     this.cloudGroup.visible = !skyReveal;
     this.skyRevealWasActive = skyReveal;
     if (
-      this.cameraMode === 0 &&
       !preview &&
       !this.reducedMotion &&
       !skyReveal
     ) {
-      this.camera.rotateZ(-this.sim.roll * 0.2);
+      if (this.cameraMode === 0) {
+        this.camera.rotateZ(-this.sim.roll * 0.2);
+      } else if (this.cameraMode === 1) {
+        this.camera.rotateZ(-this.sim.roll * 0.85);
+      } else if (this.cameraMode === 2) {
+        this.camera.rotateZ(-this.sim.roll * 0.4);
+      }
     }
     if (!this.reducedMotion && !skyReveal && this.cameraImpulse > 0.001) {
       const shakeX =
@@ -1975,6 +2017,18 @@ export class World {
         (2 * Math.tan((this.camera.fov * Math.PI) / 360)),
     );
     this.rallyWorld?.update(this.sim.rallyState, this.time);
+    if (this.sim.firefightingState) {
+      if (!this.firefightingWorld) {
+        this.firefightingWorld = new FirefightingWorld(
+          this.scene,
+          this.sim.firefightingState,
+        );
+      }
+      this.firefightingWorld.update(dt, this.sim, this.time);
+    } else if (this.firefightingWorld) {
+      this.firefightingWorld.dispose();
+      this.firefightingWorld = null;
+    }
     if (this.sunRays) {
       this.sunRays.group.visible = this.nightFactor < 0.25;
       if (this.sunRays.group.visible) {
@@ -2380,6 +2434,8 @@ export class World {
     this.landingBulbMat?.dispose();
     this.skywriting?.dispose();
     this.rallyWorld?.dispose();
+    this.firefightingWorld?.dispose();
+    this.firefightingWorld = null;
     this.rivalCoverageMesh?.geometry.dispose();
     this.rivalCoverageMesh?.material.dispose();
     this.disposed = true;

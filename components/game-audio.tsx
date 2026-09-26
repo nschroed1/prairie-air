@@ -190,6 +190,8 @@ export function useGameAudio(
     cue,
     updateRemoteProximity,
     hasMusic: Boolean(SOUNDTRACK.src),
+    getAudioStream: () =>
+      engine.current?.getStreamDestination()?.stream ?? null,
   };
 }
 

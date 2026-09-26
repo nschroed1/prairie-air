@@ -14,6 +14,7 @@ import {
   Flag,
   Wind,
   Wrench,
+  Trophy,
 } from 'lucide-react';
 import { fieldSize, type Contract, type Simulation } from '@/lib/simulation';
 import {
@@ -339,6 +340,7 @@ export function FlightDebrief({
   onNext,
   onHangar,
   onReplay,
+  onHallOfFame,
   progression,
 }: {
   sim: Simulation;
@@ -349,6 +351,7 @@ export function FlightDebrief({
   onNext: () => void;
   onHangar: () => void;
   onReplay: () => void;
+  onHallOfFame?: () => void;
   progression?: ReactNode;
 }) {
   'use no memo';
@@ -503,6 +506,12 @@ export function FlightDebrief({
               ? 'Choose an upgrade'
               : 'Visit the hangar'}
           </button>
+          {onHallOfFame && (
+            <button className="secondary" onClick={onHallOfFame}>
+              <Trophy size={16} />
+              Hall of Fame &amp; Badges
+            </button>
+          )}
           {practice && (
             <button className="text-button" onClick={onReplay}>
               Try for a cleaner finish

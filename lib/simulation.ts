@@ -41,9 +41,15 @@ import {
   stepRally,
   type RallyState,
 } from './rally';
+import {
+  freshFirefightingState,
+  stepFirefighting,
+  type FirefightingState,
+} from './firefighting';
 export { fieldSize, insideField, fieldCellCount } from './field-geometry';
 
 import { clamp, legacyGround, ground, riverX } from './terrain-math';
+import { achievementManager } from './achievements';
 export { clamp, legacyGround, ground, riverX };
 export type Field = {
   id: number;
@@ -84,7 +90,14 @@ for (let z = -6; z <= 6; z++)
     });
   }
 export type Contract = {
-  kind?: 'spray' | 'skywriting' | 'dust_off' | 'tandem' | 'rally' | 'sky_duet';
+  kind?:
+    | 'spray'
+    | 'skywriting'
+    | 'dust_off'
+    | 'tandem'
+    | 'rally'
+    | 'sky_duet'
+    | 'firefighting';
   skywriting?: SkywritingPlan;
   id: number;
   name: string;
@@ -358,10 +371,12 @@ export class Simulation {
   partnerCovered = new Set<number>();
   matchMode: 'solo' | 'dust_off' | 'tandem' | 'rally' | 'sky_duet' = 'solo';
   rallyState: RallyState | null = null;
+  firefightingState: FirefightingState | null = null;
   partnerDistance = 0;
   inFormation = false;
   formationSeconds = 0;
   coverageVersion = 0;
+  sortieStuntCount = 0;
   result = {
     pay: 0,
     bonus: 0,
@@ -383,6 +398,9 @@ export class Simulation {
   get isRally() {
     return this.job.kind === 'rally';
   }
+  get isFirefighting() {
+    return this.job.kind === 'firefighting';
+  }
   get isDustOff() {
     return this.matchMode === 'dust_off' || this.job.kind === 'dust_off';
   }
@@ -391,6 +409,11 @@ export class Simulation {
   }
   get coverage() {
     if (this.isSkywriting) return skyCoverage(this.skywriting);
+    if (this.isFirefighting) {
+      return this.firefightingState
+        ? Math.round(this.firefightingState.containedFraction * 100)
+        : 0;
+    }
     if (this.isRally) {
       return this.rallyState
         ? Math.min(100, (this.rallyState.gateIndex / 10) * 100)
@@ -408,6 +431,8 @@ export class Simulation {
   }
   get completionReady() {
     if (this.isSkywriting) return skyReady(this.job, this.skywriting);
+    if (this.isFirefighting)
+      return Boolean(this.firefightingState?.completed);
     if (this.isRally) return Boolean(this.rallyState?.completed);
     if (this.isDustOff) {
       const total = Math.max(1, fieldCellCount(this.job));
@@ -675,15 +700,23 @@ export class Simulation {
     this.partnerDistance = 0;
     if (job.kind === 'rally') {
       this.rallyState = freshRallyState();
+      this.firefightingState = null;
       this.matchMode = 'rally';
+    } else if (job.kind === 'firefighting') {
+      this.firefightingState = freshFirefightingState();
+      this.rallyState = null;
+      this.matchMode = 'solo';
     } else if (job.kind === 'dust_off') {
       this.rallyState = null;
+      this.firefightingState = null;
       this.matchMode = 'dust_off';
     } else if (job.kind === 'tandem') {
       this.rallyState = null;
+      this.firefightingState = null;
       this.matchMode = 'tandem';
     } else {
       this.rallyState = null;
+      this.firefightingState = null;
       this.matchMode = 'solo';
     }
     this.coverageVersion++;
@@ -710,6 +743,7 @@ export class Simulation {
     this.lastSprayExitHeading = 0;
     this.arcade.reset();
     this.stunts.restore();
+    this.sortieStuntCount = 0;
     this.bankedStuntBonus = 0;
     this.rewardKeys.clear();
     this.rewards = [];
@@ -790,6 +824,34 @@ export class Simulation {
       this.spraying = false;
       return true;
     }
+    if (this.isFirefighting && this.firefightingState) {
+      const contained = this.firefightingState.containedFraction;
+      const speedBonus = this.elapsed < 140 ? 150 : 0;
+      const bonus = contained >= 1.0 ? this.job.bonus : 150;
+      const gross = Math.max(0, this.job.pay + bonus + speedBonus);
+      this.result = {
+        pay: this.job.pay,
+        bonus,
+        coverage: Math.round(contained * 100),
+        penalty: 0,
+        total: gross,
+        maintenance: 0,
+        repairs: 0,
+        debt: this.serviceDue,
+        oversprayAcres: 0,
+        stuntBonus: 0,
+        cleanBonus: 0,
+        speedBonus,
+      };
+      this.career.cash += this.result.total;
+      this.career.totalEarned += this.result.total;
+      this.career.flights++;
+      if (!this.career.completed.includes(this.job.id))
+        this.career.completed.push(this.job.id);
+      this.phase = 'complete';
+      this.spraying = false;
+      return true;
+    }
     const wonDustOff = this.isDustOff
       ? this.covered.size >= this.rivalCovered.size
       : true;
@@ -845,6 +907,15 @@ export class Simulation {
       this.career.completed.push(this.job.id);
     this.phase = 'complete';
     this.spraying = false;
+    achievementManager.evaluateFlightEnd(this);
+    if (this.sortieStuntCount > 0) {
+      achievementManager.submitRecord(
+        'sortie_stunt_chain',
+        this.sortieStuntCount,
+        'Ag-Cat Sprayer',
+        this.career,
+      );
+    }
     return true;
   }
   buy(key: keyof Upgrades) {
@@ -857,6 +928,7 @@ export class Simulation {
     this.career.cash -= price;
     this.career.upgrades[key]++;
     if (key === 'tank') this.tank += 40;
+    achievementManager.evaluateUpgrades(this.career);
     return true;
   }
   step(dt: number, input: Controls) {
@@ -943,7 +1015,16 @@ export class Simulation {
     const wind = this.windVector;
     this.x += (Math.sin(this.heading) * this.speed + wind.x) * dt;
     this.z += (-Math.cos(this.heading) * this.speed + wind.z) * dt;
-    this.y += Math.sin(this.pitch) * this.speed * dt - stallSink;
+    // Aerodynamic Ground Effect Cushion:
+    // When skimming close to the deck (< 6.2m / ~20ft AGL), induced wing drag drops
+    // and ground effect creates a gentle buoyant cushion resisting inadvertent terrain strikes.
+    let groundCushion = 0;
+    if (this.altitude > 3.0 && this.altitude < 6.2) {
+      const proximity = (6.2 - this.altitude) / 3.2;
+      groundCushion = proximity * proximity * 1.65 * (this.speed / 35);
+    }
+    this.y +=
+      (Math.sin(this.pitch) * this.speed + groundCushion) * dt - stallSink;
     this.y = Math.min(this.y, 600);
     if (
       this.altitude < 3 ||
@@ -954,6 +1035,19 @@ export class Simulation {
     }
     this.stepHazards(dt);
     if (this.phase !== 'flying') return;
+    if (this.speed >= 48) {
+      achievementManager.setProgress('sound_barrier', 1);
+    }
+    if (this.altitude >= 3.0 && this.altitude <= 6.2) {
+      achievementManager.addProgress('ground_effect_glide', dt);
+    }
+    if (this.altitude >= 3.0 && this.altitude <= 9.8) {
+      achievementManager.submitRecord(
+        'lowest_deck_skim',
+        this.altitude,
+        'Ag-Cat Sprayer',
+      );
+    }
     this.lastCollectedCue = null;
     for (const c of this.collectibles) {
       if (c.collected) continue;
@@ -1014,6 +1108,18 @@ export class Simulation {
       this.lastArcadeEvents = [];
       return;
     }
+    if (this.isFirefighting) {
+      if (this.firefightingState) {
+        const { scooped } = stepFirefighting(this.firefightingState, this, dt);
+        if (scooped) {
+          this.tank = Math.min(this.tankCapacity, this.tank + dt * 35);
+          achievementManager.addProgress('river_scooper', dt * 0.35);
+        }
+      }
+      this.newCellsAdded = 0;
+      this.lastArcadeEvents = [];
+      return;
+    }
     if (this.isSkywriting) {
       const smokeDt = this.spraying ? Math.min(dt, this.tank) : 0;
       this.tank = Math.max(0, this.tank - smokeDt);
@@ -1049,6 +1155,14 @@ export class Simulation {
     this.lastArcadeEvents = arcadeEvents;
     for (const ev of arcadeEvents) {
       if (!('bonus' in ev)) continue;
+      if (ev.type === 'clean_pass' && ev.streak >= 5) {
+        achievementManager.unlock('clean_streak_5');
+      } else if (ev.type === 'ag_turn') {
+        this.sortieStuntCount++;
+        if (ev.name.includes('REVERSAL')) {
+          achievementManager.addProgress('reversal_ace', 1);
+        }
+      }
       const title =
         ev.type === 'clean_pass'
           ? `Clean pass ×${ev.streak}`
@@ -1065,7 +1179,21 @@ export class Simulation {
             : 'cash-register';
       this.awardReward(title, ev.bonus, cue);
     }
+    if (this.arcade.swathLocked) {
+      achievementManager.addProgress('swath_master', dt);
+    }
+    if (this.arcade.isDeckSkimming) {
+      achievementManager.addProgress('deck_skimmer', dt);
+    }
     for (const stunt of this.stunts.update(dt, this)) {
+      this.sortieStuntCount++;
+      if (stunt.type === 'wire-skimmer') {
+        achievementManager.addProgress('wire_skimmer', 1);
+      } else if (stunt.type === 'trestle-runner') {
+        achievementManager.addProgress('trestle_runner', 1);
+      } else if (stunt.type === 'near-miss') {
+        achievementManager.addProgress('silo_grazer', 1);
+      }
       this.awardReward(
         stunt.name,
         stunt.bonus,

@@ -8,6 +8,7 @@ import './career.css';
 import './audio.css';
 import './challenge.css';
 import './skywriting.css';
+import './achievements.css';
 
 const geistSans = Geist({
   variable: '--font-geist-sans',
