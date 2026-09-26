@@ -913,7 +913,6 @@ export class Simulation {
         'sortie_stunt_chain',
         this.sortieStuntCount,
         'Ag-Cat Sprayer',
-        this.career,
       );
     }
     return true;
@@ -967,6 +966,17 @@ export class Simulation {
           gust.pitch -
           this.pitch) *
         smooth;
+    }
+    if (
+      this.isFirefighting &&
+      this.firefightingState &&
+      this.firefightingState.turbulence > 0.05
+    ) {
+      const turb = this.firefightingState.turbulence;
+      const shakePitch = Math.sin(this.elapsed * 22.0) * turb * 0.04;
+      const shakeRoll = Math.cos(this.elapsed * 17.0) * turb * 0.06;
+      this.pitch += shakePitch * dt;
+      this.roll += shakeRoll * dt;
     }
     this.throttle = clamp(
       this.throttle +
@@ -1023,8 +1033,15 @@ export class Simulation {
       const proximity = (6.2 - this.altitude) / 3.2;
       groundCushion = proximity * proximity * 1.65 * (this.speed / 35);
     }
+    // Convective Wildfire Thermal Updraft:
+    // Blazing hotspots generate buoyant thermal updrafts pushing aircraft upwards.
+    const thermalUpdraft =
+      this.isFirefighting && this.firefightingState
+        ? this.firefightingState.thermalLift
+        : 0;
     this.y +=
-      (Math.sin(this.pitch) * this.speed + groundCushion) * dt - stallSink;
+      (Math.sin(this.pitch) * this.speed + groundCushion + thermalUpdraft) * dt -
+      stallSink;
     this.y = Math.min(this.y, 600);
     if (
       this.altitude < 3 ||
@@ -1110,10 +1127,17 @@ export class Simulation {
     }
     if (this.isFirefighting) {
       if (this.firefightingState) {
-        const { scooped } = stepFirefighting(this.firefightingState, this, dt);
+        const { scooped, extinguishedAny } = stepFirefighting(
+          this.firefightingState,
+          this,
+          dt,
+        );
         if (scooped) {
           this.tank = Math.min(this.tankCapacity, this.tank + dt * 35);
           achievementManager.addProgress('river_scooper', dt * 0.35);
+        }
+        if (extinguishedAny && !this.lastStuntCue) {
+          this.lastStuntCue = 'steam-hiss';
         }
       }
       this.newCellsAdded = 0;

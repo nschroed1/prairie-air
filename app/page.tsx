@@ -32,7 +32,6 @@ import {
   Video,
   Flame,
   Crown,
-  Medal,
 } from 'lucide-react';
 import {
   Dialog,
@@ -124,6 +123,7 @@ import { RallyHud } from '@/components/rally-hud';
 import { TandemHud } from '@/components/tandem-hud';
 import { firefightingContract } from '@/lib/firefighting';
 import { FirefightingHud } from '@/components/firefighting-hud';
+import { SmokeVignetteOverlay } from '@/components/smoke-vignette-overlay';
 import { FlightVideoRecorder } from '@/lib/video-recorder';
 import { achievementManager } from '@/lib/achievements';
 import { HallOfFameModal } from '@/components/hall-of-fame-modal';
@@ -1655,11 +1655,18 @@ export default function Home() {
           <RallyHud sim={sim} />
           <TandemHud sim={sim} />
           {sim.isFirefighting && sim.firefightingState && (
-            <FirefightingHud
-              state={sim.firefightingState}
-              spraying={sim.spraying}
-              altitude={sim.altitude}
-            />
+            <>
+              <FirefightingHud
+                state={sim.firefightingState}
+                spraying={sim.spraying}
+                altitude={sim.altitude}
+              />
+              <SmokeVignetteOverlay
+                smokeExposure={sim.firefightingState.smokeExposure ?? 0}
+                cameraMode={cameraMode}
+                thermalLift={sim.firefightingState.thermalLift ?? 0}
+              />
+            </>
           )}
           {cameraMode === 1 && (
             <div

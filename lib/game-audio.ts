@@ -34,7 +34,9 @@ export type AudioCue =
   | 'flow-tick'
   | 'deck-skim'
   | 'wire-skimmer'
-  | 'trestle-runner';
+  | 'trestle-runner'
+  | 'steam-hiss'
+  | 'fire-roar';
 export type AudioFrame = {
   job: number;
   phase: Phase;
@@ -65,6 +67,8 @@ export type AudioFrame = {
   deckSkimming?: boolean;
   nearMiss?: boolean;
   rewards?: FlightReward[];
+  fireProximity?: number;
+  smokeExposure?: number;
 };
 
 export function audioFrame(sim: Simulation, assigned = true): AudioFrame {
@@ -102,6 +106,8 @@ export function audioFrame(sim: Simulation, assigned = true): AudioFrame {
     sprayPop: (sim.newCellsAdded ?? 0) > 0,
     passStreak: sim.arcade?.passStreak ?? 1,
     deckSkimming: sim.arcade?.isDeckSkimming ?? false,
+    fireProximity: sim.firefightingState?.proximityToFire ?? 0,
+    smokeExposure: sim.firefightingState?.smokeExposure ?? 0,
   };
 }
 
@@ -328,6 +334,7 @@ export class GameAudio {
   private wind: Layer;
   private spray: Layer;
   private rain: Layer;
+  private fireRoar: Layer;
   private sources: AudioScheduledSourceNode[] = [];
   private musicSource: AudioBufferSourceNode | null = null;
   private musicRequest: Promise<void> | null = null;
@@ -480,6 +487,8 @@ export class GameAudio {
     this.spray = this.noise(noise, 'bandpass', 2200, 1.3);
     this.spray.filter.Q.value = 0.6;
     this.rain = this.noise(noise, 'highpass', 1500, 2.7);
+    this.fireRoar = this.noise(noise, 'bandpass', 240, 1.8);
+    this.fireRoar.filter.Q.value = 1.2;
   }
 
   private tone(type: OscillatorType, destination: AudioNode): Tone {
@@ -602,6 +611,25 @@ export class GameAudio {
     ramp(this.wind.pan.pan, frame.pan, 0.6);
     ramp(this.spray.gain.gain, flying && frame.spraying ? 0.17 : 0, 0.035);
     ramp(this.rain.gain.gain, flying ? clamp(frame.rain, 0, 1) * 0.17 : 0, 0.5);
+
+    // Wildfire Fire Roar soundscape: swells when close to burning timber
+    const fireProx = frame.fireProximity ?? 0;
+    ramp(
+      this.fireRoar.gain.gain,
+      flying && fireProx > 0.04 ? fireProx * 0.28 : 0,
+      0.1,
+    );
+    ramp(this.fireRoar.filter.frequency, 160 + fireProx * 220, 0.1);
+
+    // Smoke muffling on wind rush when engulfed in dense smoke plumes
+    const smokeMuffle = clamp(frame.smokeExposure ?? 0, 0, 1);
+    if (smokeMuffle > 0.15) {
+      ramp(
+        this.wind.filter.frequency,
+        Math.max(220, 450 + frame.speed * 9 + gust * 1300 - smokeMuffle * 320),
+        0.12,
+      );
+    }
 
     // High-speed aerodynamic dive roar (>42 m/s / ~94 mph)
     const diveRatio =
@@ -852,6 +880,41 @@ export class GameAudio {
     }
   }
 
+  playSteamHiss() {
+    if (
+      this.disposed ||
+      !this.audible ||
+      !this.effectsAudible ||
+      this.context.state !== 'running'
+    )
+      return;
+    const ctx = this.context;
+    const now = ctx.currentTime;
+    const length = Math.floor(ctx.sampleRate * 1.1);
+    const buffer = ctx.createBuffer(1, length, ctx.sampleRate);
+    const data = buffer.getChannelData(0);
+    for (let i = 0; i < length; i++) {
+      data[i] = (Math.random() * 2 - 1) * 0.35;
+    }
+    const source = ctx.createBufferSource();
+    source.buffer = buffer;
+    const filter = ctx.createBiquadFilter();
+    filter.type = 'bandpass';
+    filter.frequency.setValueAtTime(2600, now);
+    filter.frequency.exponentialRampToValueAtTime(700, now + 1.0);
+    filter.Q.value = 1.4;
+    const gain = ctx.createGain();
+    gain.gain.setValueAtTime(0.32, now);
+    gain.gain.exponentialRampToValueAtTime(0.01, now + 1.05);
+    source.connect(filter).connect(gain).connect(this.effects);
+    source.start(now);
+    source.onended = () => {
+      source.disconnect();
+      filter.disconnect();
+      gain.disconnect();
+    };
+  }
+
   play(cue: AudioCue) {
     if (
       this.disposed ||
@@ -874,6 +937,10 @@ export class GameAudio {
             : null,
     );
 
+    if (cue === 'steam-hiss') {
+      this.playSteamHiss();
+      return;
+    }
     if (cue === 'spray-pop' || cue === 'flow-tick') {
       this.playSprayPop();
       return;
@@ -923,6 +990,8 @@ export class GameAudio {
       'inverted-barnstormer': [440, 554, 659, 880, 1108],
       'wire-skimmer': [587, 880],
       'trestle-runner': [294, 440, 587],
+      'steam-hiss': [440],
+      'fire-roar': [120],
     };
     const valve = cue === 'spray-on' || cue === 'spray-off';
     const warning =

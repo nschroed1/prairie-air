@@ -1798,6 +1798,21 @@ export class World {
     );
     const targetFogColor = dayFogColor.lerp(new T.Color(NIGHT_FOG_COLOR), this.nightFactor);
     fog.color.lerp(targetFogColor, blend);
+
+    // Wildfire Smoke Atmospheric Attenuation:
+    // Plumes blowing across Cedar Valley cast a thick amber-gray haze over the sky
+    if (this.sim.isFirefighting && this.sim.firefightingState) {
+      const smokeExp = this.sim.firefightingState.smokeExposure ?? 0;
+      if (smokeExp > 0.01) {
+        const smokeTargetDensity = Math.max(targetFogDensity, 0.00012 + smokeExp * 0.0062);
+        fog.density += (smokeTargetDensity - fog.density) * Math.min(1, blend * 3.8);
+        const smokeHaze = new T.Color('#382d22').lerp(new T.Color('#221c17'), smokeExp);
+        fog.color.lerp(smokeHaze, Math.min(1, smokeExp * 0.85));
+        if (this.sun) {
+          this.sun.intensity *= (1 - smokeExp * 0.6);
+        }
+      }
+    }
     this.cloudSystem?.updateWeather(forecast, dt, this.time);
     this.cloudMaterial?.color.lerp(
       this.weatherColor.set(forecast.cloud > 0.7 ? '#a6b5bb' : '#f5f1df').lerp(new T.Color('#1e2838'), this.nightFactor * 0.85),

@@ -577,3 +577,27 @@
   background: rgba(34, 197, 94, 0.4);
   color: #ffffff;
 }
+
+@keyframes smokeDrift {
+  0% {
+    transform: scale(1) translate(0, 0);
+  }
+  100% {
+    transform: scale(1.04) translate(-10px, -6px);
+  }
+}
+
+@keyframes ashDrift {
+  0% {
+    transform: translateY(0) scale(0.9);
+    opacity: 0.1;
+  }
+  30% {
+    opacity: 0.8;
+  }
+  100% {
+    transform: translateY(-80px) translateX(25px) scale(1.3);
+    opacity: 0;
+  }
+}
+

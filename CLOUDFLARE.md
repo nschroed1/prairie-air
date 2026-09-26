@@ -4,9 +4,9 @@ The Cloudflare deployment uses Workers for the game and API, and the existing Su
 
 Live URL: https://playprairieair.com
 
-Latest release: September 26, 2026, version `9359b821-c1dc-47ba-ad38-d5c9738c8549`. Publishes the feature sweep: Hall of Fame & Badges system, Video Recording & Highlight Reels, 4-Mode Dynamic Camera (Chase, Cockpit, Flyby, Swath), Ground Effect & Low-Altitude Audio Immersion, and Aerial Firefighting with Water Scooping & Drops. All 266 automated tests passed, type checks passed, and Cloudflare Workers deploy succeeded.
+Latest release: September 26, 2026, version `47985439-dd0a-4fc0-a903-089250467296`. Publishes enhanced aerial firefighting: dynamic flame pillars, flickering point lights, flying embers and sparks, charred ash scorch discs, steam vapor clouds on retardant impact, downwind atmospheric smoke plumes, dynamic scene fog visibility obscuration, cockpit windshield smoke & soot vignette, convective thermal updrafts and buffeting turbulence, and fire roaring & steam hiss audio cues. All 268 automated tests passed, type checks passed, and Cloudflare Workers deploy succeeded.
 
-Previous release for rollback: `1414fc68-8b53-4a03-af17-1ba53924fff7`.
+Previous release for rollback: `9359b821-c1dc-47ba-ad38-d5c9738c8549`.
 
 The original https://prairie-air.extremecode-767.workers.dev address remains available. The custom domain is declared in `wrangler.cloudflare.jsonc`, so future deployments preserve it.
 

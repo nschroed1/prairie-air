@@ -116,6 +116,57 @@ export function FirefightingHud({
         </div>
       )}
 
+      {state.smokeExposure > 0.45 ? (
+        <div
+          style={{
+            background: 'rgba(239, 68, 68, 0.3)',
+            border: '1px solid #ef4444',
+            borderRadius: '6px',
+            padding: '3px 8px',
+            fontSize: '11px',
+            color: '#fecaca',
+            textAlign: 'center',
+            fontWeight: 700,
+            letterSpacing: '0.04em',
+            animation: 'pulse 0.8s infinite',
+          }}
+        >
+          ⚠️ ZERO VISIBILITY · DENSE SMOKE HAZARD
+        </div>
+      ) : state.smokeExposure > 0.15 ? (
+        <div
+          style={{
+            background: 'rgba(245, 158, 11, 0.22)',
+            border: '1px solid #f59e0b',
+            borderRadius: '6px',
+            padding: '3px 8px',
+            fontSize: '11px',
+            color: '#fde68a',
+            textAlign: 'center',
+            fontWeight: 600,
+          }}
+        >
+          🌫️ SMOKE PLUME · VISIBILITY COMPROMISED ({Math.round(state.smokeExposure * 100)}%)
+        </div>
+      ) : null}
+
+      {state.thermalLift > 1.0 && (
+        <div
+          style={{
+            background: 'rgba(249, 115, 22, 0.25)',
+            border: '1px solid #ea580c',
+            borderRadius: '6px',
+            padding: '3px 8px',
+            fontSize: '11px',
+            color: '#fdba74',
+            textAlign: 'center',
+            fontWeight: 600,
+          }}
+        >
+          🔥 CONVECTIVE UPDRAFT +{state.thermalLift.toFixed(1)} m/s · HOLD CONTROLS
+        </div>
+      )}
+
       {percent >= 95 && (
         <div
           style={{
