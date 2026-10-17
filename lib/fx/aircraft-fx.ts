@@ -1,5 +1,7 @@
 import * as T from 'three';
 import type { Simulation } from '../simulation';
+import { riverX } from '../terrain-math';
+import { CEDAR_DIP_POND } from '../firefighting';
 
 const LEFT_WINGTIP = new T.Vector3(-10, -0.25, -0.3);
 const RIGHT_WINGTIP = new T.Vector3(10, -0.25, -0.3);
@@ -483,11 +485,21 @@ export class AircraftFX {
     const washActive = sim.altitude < 9 && sim.speed > 20;
 
     if (washActive) {
+      const overRiver = Math.abs(sim.x - riverX(sim.z)) < 64;
+      const overDipBasin =
+        Math.hypot(sim.x - CEDAR_DIP_POND.x, sim.z - CEDAR_DIP_POND.z) <
+        CEDAR_DIP_POND.radius + 6;
+      const overWater =
+        overRiver ||
+        overDipBasin ||
+        Boolean(sim.firefightingState?.isScooping);
+
       const groundProximity = Math.max(0, 1 - sim.altitude / 9);
       const speedFactor = Math.min(1, (sim.speed - 20) / 20);
       const washIntensity = groundProximity * speedFactor;
 
-      this.dustEmissionAcc += dt * (washIntensity * 85);
+      this.dustEmissionAcc +=
+        dt * (washIntensity * (overWater ? 130 : 85));
       const emitCount = Math.floor(this.dustEmissionAcc);
       this.dustEmissionAcc -= emitCount;
 
@@ -501,15 +513,15 @@ export class AircraftFX {
         let localZ: number;
 
         if (rand < 0.35) {
-          // Left wheel wake
+          // Left wheel / float wake
           localX = -1.7 + (Math.random() - 0.5) * 0.5;
           localZ = 0.3 + Math.random() * 0.8;
         } else if (rand < 0.7) {
-          // Right wheel wake
+          // Right wheel / float wake
           localX = 1.7 + (Math.random() - 0.5) * 0.5;
           localZ = 0.3 + Math.random() * 0.8;
         } else {
-          // Propeller slipstream ground wash
+          // Propeller slipstream / scoop probe wake
           localX = (Math.random() - 0.5) * 3.4;
           localZ = -2.2 + Math.random() * 3.8;
         }
@@ -526,16 +538,27 @@ export class AircraftFX {
 
         // Kick up velocity: backward wash plus turbulent upward dispersion
         const washSpeed = (7.5 + sim.speed * 0.32) * groundProximity;
+        const upwardBoost = overWater ? 2.4 : 1.1;
         this.dustVelocities[i3] =
-          this.backwardDir.x * washSpeed + (Math.random() - 0.5) * 2.6;
+          this.backwardDir.x * washSpeed + (Math.random() - 0.5) * 3.0;
         this.dustVelocities[i3 + 1] =
-          1.1 + Math.random() * 2.4 * washIntensity;
+          upwardBoost + Math.random() * (overWater ? 3.8 : 2.4) * washIntensity;
         this.dustVelocities[i3 + 2] =
-          this.backwardDir.z * washSpeed + (Math.random() - 0.5) * 2.6;
+          this.backwardDir.z * washSpeed + (Math.random() - 0.5) * 3.0;
 
-        // Color variety: soil dust, dried tan husks, and yellow-green crop debris/pollen
         const cType = Math.random();
-        if (cType < 0.35) {
+        if (overWater) {
+          // Shimmering white foam & cyan water rooster-tail spray
+          if (cType < 0.5) {
+            this.dustColors[i3] = 0.92;
+            this.dustColors[i3 + 1] = 0.98;
+            this.dustColors[i3 + 2] = 1.0;
+          } else {
+            this.dustColors[i3] = 0.45;
+            this.dustColors[i3 + 1] = 0.84;
+            this.dustColors[i3 + 2] = 0.98;
+          }
+        } else if (cType < 0.35) {
           // Crop debris / pollen
           this.dustColors[i3] = 0.78;
           this.dustColors[i3 + 1] = 0.85;

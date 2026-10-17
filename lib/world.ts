@@ -150,6 +150,8 @@ export class World {
   coverageLineTiles = new Map<number, number[]>();
   particles: T.Points;
   particlePositions = new Float32Array(2100);
+  particleColors = new Float32Array(2100);
+  particleSizes = new Float32Array(700);
   particleLife = new Float32Array(700);
   particleIndex = 0;
   particleEmission = 0;
@@ -392,32 +394,53 @@ export class World {
 
     this.rallyWorld = new RallyWorld();
     this.scene.add(this.rallyWorld.group);
+    for (let i = 0; i < 700; i++) {
+      this.particleColors[i * 3] = 0.95;
+      this.particleColors[i * 3 + 1] = 1.0;
+      this.particleColors[i * 3 + 2] = 0.87;
+      this.particleSizes[i] = 1.0;
+    }
     const pg = new T.BufferGeometry();
     pg.setAttribute(
       'position',
-      new T.BufferAttribute(this.particlePositions, 3),
+      new T.BufferAttribute(this.particlePositions, 3).setUsage(
+        T.DynamicDrawUsage,
+      ),
+    );
+    pg.setAttribute(
+      'color',
+      new T.BufferAttribute(this.particleColors, 3).setUsage(
+        T.DynamicDrawUsage,
+      ),
     );
     pg.setAttribute(
       'sprayAlpha',
       new T.BufferAttribute(this.particleAlpha, 1).setUsage(T.DynamicDrawUsage),
     );
+    pg.setAttribute(
+      'spraySize',
+      new T.BufferAttribute(this.particleSizes, 1).setUsage(T.DynamicDrawUsage),
+    );
     const sprayMaterial = new T.PointsMaterial({
-      color: '#f4ffde',
-      size: 3.8,
+      color: '#ffffff',
+      vertexColors: true,
+      size: 4.5,
       transparent: true,
-      opacity: 0.36,
+      opacity: 0.48,
       depthWrite: false,
       map: this.particleTexture(),
       sizeAttenuation: true,
     });
     sprayMaterial.onBeforeCompile = (shader) => {
       shader.vertexShader =
-        'attribute float sprayAlpha; varying float vSprayAlpha;\n' +
+        'attribute float sprayAlpha; attribute float spraySize; varying float vSprayAlpha;\n' +
         shader.vertexShader;
-      shader.vertexShader = shader.vertexShader.replace(
-        '#include <begin_vertex>',
-        '#include <begin_vertex>\nvSprayAlpha=sprayAlpha;',
-      );
+      shader.vertexShader = shader.vertexShader
+        .replace(
+          '#include <begin_vertex>',
+          '#include <begin_vertex>\nvSprayAlpha=sprayAlpha;',
+        )
+        .replace('gl_PointSize = size;', 'gl_PointSize = size * spraySize;');
       shader.fragmentShader =
         'varying float vSprayAlpha;\n' + shader.fragmentShader;
       shader.fragmentShader = shader.fragmentShader.replace(
@@ -425,7 +448,7 @@ export class World {
         '#include <color_fragment>\ndiffuseColor.a*=vSprayAlpha;',
       );
     };
-    sprayMaterial.customProgramCacheKey = () => 'prairie-spray-v2';
+    sprayMaterial.customProgramCacheKey = () => 'prairie-spray-v3';
     this.particles = new T.Points(pg, sprayMaterial);
     this.particles.frustumCulled = false;
     this.scene.add(this.particles);
@@ -882,6 +905,7 @@ export class World {
           if (
             !field ||
             inFarmClearing(x, z) ||
+            Math.hypot(x - -165, z - 225) < 58 ||
             (this.guidanceAvailable &&
               inNoSprayZone(this.sim.job, x - this.sim.job.x, z - this.sim.job.z))
           )
@@ -1350,8 +1374,11 @@ export class World {
     }
   }
   updateMarker() {
-    this.marker.visible = !this.sim.isSkywriting;
-    if (this.sim.isSkywriting) return;
+    this.marker.visible =
+      !this.sim.isSkywriting &&
+      !this.sim.isFirefighting &&
+      !this.sim.isRally;
+    if (!this.marker.visible) return;
     const shapeKey = JSON.stringify([
       this.sim.job.width,
       this.sim.job.depth,
@@ -1562,6 +1589,8 @@ export class World {
   updateGuides() {
     const visible =
       !this.sim.isSkywriting &&
+      !this.sim.isFirefighting &&
+      !this.sim.isRally &&
       this.guidesEnabled &&
       this.guidanceAvailable &&
       (this.sim.phase === 'flying' || this.sim.phase === 'paused');
@@ -1659,9 +1688,14 @@ export class World {
   }
   updateCoverage() {
     this.coverageMesh.visible = this.coverageLineMesh.visible =
-      !this.sim.isSkywriting && !this.sim.isRally;
+      !this.sim.isSkywriting &&
+      !this.sim.isRally &&
+      !this.sim.isFirefighting;
     this.rivalCoverageMesh.visible =
-      !this.sim.isSkywriting && !this.sim.isRally && (this.sim.isDustOff || this.sim.isTandem);
+      !this.sim.isSkywriting &&
+      !this.sim.isRally &&
+      !this.sim.isFirefighting &&
+      (this.sim.isDustOff || this.sim.isTandem);
     if (this.lastCoverage === this.sim.coverageVersion) return;
     this.lastCoverage = this.sim.coverageVersion;
     let i = 0;
@@ -1703,42 +1737,95 @@ export class World {
   }
   updateParticles(dt: number) {
     const wind = this.sim.windVector;
+    const isFire = this.sim.isFirefighting;
+    const sprayMat = this.particles.material as T.PointsMaterial;
+    sprayMat.size = isFire ? 6.8 : 4.4;
+    sprayMat.opacity = isFire ? 0.78 : 0.44;
+
     if (this.sim.spraying && !this.sim.isSkywriting) {
-      this.particleEmission += dt * 440;
+      this.particleEmission += dt * (isFire ? 560 : 450);
       const emitted = Math.floor(this.particleEmission);
       this.particleEmission -= emitted;
-      const emitWidth = Math.min(
-        this.sim.swath * 0.45,
-        18 + (this.sim.career.upgrades?.boom ?? 0) * 8,
-      );
+      const emitWidth = isFire
+        ? 11.5
+        : Math.min(
+            this.sim.swath * 0.45,
+            18 + (this.sim.career.upgrades?.boom ?? 0) * 8,
+          );
       for (let p = 0; p < emitted; p++) {
         const i = this.particleIndex++ % 700;
         const side = (rng() - 0.5) * emitWidth;
         const v = this.particleVector
-          .set(side, -0.8, 1.2)
+          .set(side, isFire ? -1.15 : -0.8, isFire ? 0.6 : 1.2)
           .applyMatrix4(this.plane.matrixWorld);
         this.particlePositions[i * 3] = v.x;
         this.particlePositions[i * 3 + 1] = v.y;
         this.particlePositions[i * 3 + 2] = v.z;
-        this.particleLife[i] = 1.35 + rng() * 0.45;
+        this.particleLife[i] = isFire
+          ? 1.55 + rng() * 0.55
+          : 1.35 + rng() * 0.45;
+        this.particleSizes[i] = isFire ? 0.85 : 0.8;
+
+        const cIdx = i * 3;
+        if (isFire) {
+          // Heavy Crimson Phos-Chek Fire Retardant Slurry & Foam Deluge
+          const cRoll = rng();
+          if (cRoll < 0.52) {
+            this.particleColors[cIdx] = 0.88;
+            this.particleColors[cIdx + 1] = 0.11;
+            this.particleColors[cIdx + 2] = 0.28;
+          } else if (cRoll < 0.84) {
+            this.particleColors[cIdx] = 0.96;
+            this.particleColors[cIdx + 1] = 0.25;
+            this.particleColors[cIdx + 2] = 0.37;
+          } else {
+            // Aerated white-pink slurry foam
+            this.particleColors[cIdx] = 1.0;
+            this.particleColors[cIdx + 1] = 0.84;
+            this.particleColors[cIdx + 2] = 0.88;
+          }
+        } else {
+          // Crisp agricultural spray mist
+          this.particleColors[cIdx] = 0.95;
+          this.particleColors[cIdx + 1] = 1.0;
+          this.particleColors[cIdx + 2] = 0.87;
+        }
       }
     }
+    const fallSpeed = isFire ? 10.5 : 6.2;
     for (let i = 0; i < 700; i++) {
       if (this.particleLife[i] > 0) {
         this.particleLife[i] -= dt;
-        this.particlePositions[i * 3] +=
-          (wind.x + Math.sin(i * 0.7) * 0.18) * dt;
-        this.particlePositions[i * 3 + 2] +=
-          (wind.z + Math.cos(i * 0.6) * 0.12) * dt;
-        this.particleAlpha[i] = Math.min(1, this.particleLife[i] * 1.5);
-        this.particlePositions[i * 3 + 1] -= dt * 6;
+        const px =
+          this.particlePositions[i * 3] +
+          (wind.x + Math.sin(i * 0.7 + this.time * 2) * (isFire ? 1.2 : 0.35)) *
+            dt;
+        const pz =
+          this.particlePositions[i * 3 + 2] +
+          (wind.z + Math.cos(i * 0.6 + this.time * 2) * (isFire ? 1.2 : 0.35)) *
+            dt;
+        let py = this.particlePositions[i * 3 + 1] - dt * fallSpeed;
+        const gy = ground(px, pz) + 0.35;
+        if (py < gy) {
+          py = gy;
+        }
+        this.particlePositions[i * 3] = px;
+        this.particlePositions[i * 3 + 1] = py;
+        this.particlePositions[i * 3 + 2] = pz;
+        this.particleAlpha[i] = Math.min(1, this.particleLife[i] * 1.45);
+        this.particleSizes[i] = Math.min(
+          isFire ? 2.2 : 1.65,
+          this.particleSizes[i] + dt * (isFire ? 0.95 : 0.45),
+        );
       } else {
         this.particlePositions[i * 3 + 1] = -1000;
         this.particleAlpha[i] = 0;
       }
     }
     this.particles.geometry.attributes.position.needsUpdate = true;
+    this.particles.geometry.attributes.color.needsUpdate = true;
     this.particles.geometry.attributes.sprayAlpha.needsUpdate = true;
+    this.particles.geometry.attributes.spraySize.needsUpdate = true;
   }
   resize() {
     const w = this.host.clientWidth,
@@ -2040,6 +2127,15 @@ export class World {
         );
       }
       this.firefightingWorld.update(dt, this.sim, this.time, this.camera);
+      if (this.sim.firefightingState.turbulence > 0.25) {
+        this.cameraImpulse = Math.max(
+          this.cameraImpulse,
+          this.sim.firefightingState.turbulence * 0.055,
+        );
+      }
+      if (this.sim.firefightingState.isScooping) {
+        this.cameraImpulse = Math.max(this.cameraImpulse, 0.045);
+      }
     } else if (this.firefightingWorld) {
       this.firefightingWorld.dispose();
       this.firefightingWorld = null;

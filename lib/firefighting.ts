@@ -3,12 +3,14 @@ import type { Contract, Simulation } from './simulation';
 
 export interface FireHotspot {
   id: number;
+  name?: string;
   x: number;
   z: number;
   y: number;
   radius: number;
   intensity: number; // 1.0 (burning strong) to 0.0 (extinguished)
   initialIntensity: number;
+  contained?: boolean;
 }
 
 export interface SteamPuff {
@@ -22,6 +24,22 @@ export interface SteamPuff {
   maxLife: number;
   scale: number;
 }
+
+export interface RetardantDrop {
+  x: number;
+  z: number;
+  y: number;
+  radius: number;
+  heading: number;
+  alpha: number;
+}
+
+export const CEDAR_DIP_POND = {
+  x: -165,
+  z: 225,
+  radius: 52,
+  name: 'Cedar Valley Dip Basin',
+} as const;
 
 export interface FirefightingState {
   hotspots: FireHotspot[];
@@ -37,16 +55,18 @@ export interface FirefightingState {
   turbulence: number; // Buffeting stick shake intensity (0 to 1)
   proximityToFire: number; // Proximity to nearest active flame (0 to 1)
   steamPuffs: SteamPuff[];
+  retardantDrops: RetardantDrop[];
+  dropEmitAccum?: number;
 }
 
 export function getFireHotspots(): FireHotspot[] {
   const centers = [
-    { id: 1, x: -380, z: 280, radius: 24 },
-    { id: 2, x: -330, z: 210, radius: 22 },
-    { id: 3, x: -440, z: 350, radius: 26 },
-    { id: 4, x: -280, z: 160, radius: 20 },
-    { id: 5, x: -360, z: 90, radius: 25 },
-    { id: 6, x: -410, z: 180, radius: 22 },
+    { id: 1, name: 'North Ridge Pine Stand', x: -380, z: 280, radius: 24 },
+    { id: 2, name: 'East Hollow Brush', x: -330, z: 210, radius: 22 },
+    { id: 3, name: 'Upper Crest Windbreak', x: -440, z: 350, radius: 26 },
+    { id: 4, name: 'Lower Draw Timber', x: -280, z: 160, radius: 20 },
+    { id: 5, name: 'South Spur Thicket', x: -360, z: 90, radius: 25 },
+    { id: 6, name: 'West Ravine Redcedars', x: -410, z: 180, radius: 22 },
   ];
 
   return centers.map((c) => ({
@@ -54,6 +74,7 @@ export function getFireHotspots(): FireHotspot[] {
     y: ground(c.x, c.z) + 1.2,
     intensity: 1.0,
     initialIntensity: 1.0,
+    contained: false,
   }));
 }
 
@@ -72,6 +93,8 @@ export function freshFirefightingState(): FirefightingState {
     turbulence: 0,
     proximityToFire: 0,
     steamPuffs: [],
+    retardantDrops: [],
+    dropEmitAccum: 0,
   };
 }
 
@@ -88,7 +111,7 @@ export function firefightingContract(base: Contract): Contract {
     depth: 300,
     crop: 'pasture',
     treatment: 'Phos-Chek Red Slurry & River Water',
-    note: 'Drop red fire-retardant payload on brushfire clusters. Skim Cedar River below 4.5m AGL to scoop water refills.',
+    note: 'Drop red fire-retardant payload on timber fire clusters. Skim the Cedar Valley Dip Basin or Cedar River (<8m AGL) to scoop refills.',
     difficulty: 'Air Tanker Ops',
     acres: 36,
     pay: 950,
@@ -96,7 +119,7 @@ export function firefightingContract(base: Contract): Contract {
     target: 95,
     bonusTarget: 100,
     briefing:
-      'Dry winds ignited a fast-moving brushfire on the Cedar Valley timber ridge. Fly low through the smoke to lay down your retardant swath. When your tank runs dry, swoop down to skim the Cedar River (<4.5m AGL) or touch down at the grass strip to scoop a refill.',
+      'Dry winds ignited a fast-moving crown & brushfire across the Cedar Valley timber ridge. Fly low (<100 ft AGL) and hold SPACE to lay down crimson Phos-Chek retardant swaths across all 6 burning timber stands. When your tank runs low, swoop over the nearby Cedar Valley Dip Basin or Cedar River (<25 ft AGL) to scoop water refills on the fly.',
   };
 }
 
@@ -104,10 +127,17 @@ export function stepFirefighting(
   state: FirefightingState,
   sim: Simulation,
   dt: number,
-): { scooped: boolean; extinguishedAny: boolean } {
+): {
+  scooped: boolean;
+  extinguishedAny: boolean;
+  hotspotContained?: FireHotspot | null;
+} {
   state.elapsed += dt;
   let scooped = false;
   let extinguishedAny = false;
+  let hotspotContained: FireHotspot | null = null;
+
+  if (!state.retardantDrops) state.retardantDrops = [];
 
   // Advance and clean up existing steam puffs
   if (state.steamPuffs && state.steamPuffs.length > 0) {
@@ -116,29 +146,38 @@ export function stepFirefighting(
       puff.x += puff.vx * dt;
       puff.y += puff.vy * dt;
       puff.z += puff.vz * dt;
-      puff.scale += dt * 3.5;
+      puff.scale += dt * 4.2;
       return puff.life < puff.maxLife;
     });
   } else {
     state.steamPuffs = [];
   }
 
-  // 1. Water Scooping: check if flying low over the Cedar River
+  // 1. Water Scooping: check if skimming low over the Cedar River, Dip Basin, or Airstrip
   const rX = riverX(sim.z);
   const distToRiver = Math.abs(sim.x - rX);
-  const isOverRiver = distToRiver < 60;
-  const isScoopAltitude = sim.altitude > 2.8 && sim.altitude < 4.8;
+  const isOverRiver = distToRiver < 64;
+  const distToDipPond = Math.hypot(
+    sim.x - CEDAR_DIP_POND.x,
+    sim.z - CEDAR_DIP_POND.z,
+  );
+  const isOverDipPond = distToDipPond < CEDAR_DIP_POND.radius + 12;
+  const isScoopAltitude = sim.altitude > 2.0 && sim.altitude < 8.5;
   const isNearRunway =
-    Math.hypot(sim.x - -170, sim.z - 250) < 65 && sim.altitude < 5;
+    (Math.hypot(sim.x - -170, sim.z - 250) < 68 ||
+      Math.hypot(sim.x - -275, sim.z - -195) < 85) &&
+    sim.altitude < 7.5;
 
-  if ((isOverRiver && isScoopAltitude) || isNearRunway) {
+  if (((isOverRiver || isOverDipPond) && isScoopAltitude) || isNearRunway) {
     if (state.waterTank < state.waterCapacity) {
       state.waterTank = Math.min(
         state.waterCapacity,
-        state.waterTank + dt * 40,
+        state.waterTank + dt * 45,
       );
       state.isScooping = true;
       scooped = true;
+    } else {
+      state.isScooping = true;
     }
   } else {
     state.isScooping = false;
@@ -146,28 +185,92 @@ export function stepFirefighting(
 
   // 2. Retardant Drop: when spraying and water tank has payload
   if (sim.spraying && state.waterTank > 0) {
-    state.waterTank = Math.max(0, state.waterTank - dt * 28);
+    state.waterTank = Math.max(0, state.waterTank - dt * 19);
+
+    const wind = sim.windVector;
+    // Ballistic impact point slightly ahead of nose + wind drift
+    const fallTime = Math.min(1.1, Math.max(0.15, sim.altitude / 22));
+    const leadX =
+      sim.x +
+      Math.sin(sim.heading) * (sim.speed * fallTime * 0.35) +
+      wind.x * fallTime * 0.5;
+    const leadZ =
+      sim.z -
+      Math.cos(sim.heading) * (sim.speed * fallTime * 0.35) +
+      wind.z * fallTime * 0.5;
+
+    // Record crimson Phos-Chek slurry ground decals when within effective drop ceiling (<42m)
+    if (sim.altitude < 42) {
+      state.dropEmitAccum = (state.dropEmitAccum ?? 0) + dt * 9.5;
+      if (state.dropEmitAccum >= 1) {
+        state.dropEmitAccum -= 1;
+        state.retardantDrops.push({
+          x: leadX,
+          z: leadZ,
+          y: ground(leadX, leadZ) + 0.3,
+          radius: Math.min(20, Math.max(11, sim.swath * 0.24)),
+          heading: sim.heading,
+          alpha: 0.9,
+        });
+        if (state.retardantDrops.length > 72) {
+          state.retardantDrops.shift();
+        }
+      }
+    }
 
     for (const spot of state.hotspots) {
       if (spot.intensity <= 0) continue;
-      const d = Math.hypot(sim.x - spot.x, sim.z - spot.z);
-      if (d < spot.radius + 14 && sim.altitude < 32) {
-        const cooling = dt * 0.55;
+      const dDirect = Math.hypot(sim.x - spot.x, sim.z - spot.z);
+      const dLead = Math.hypot(leadX - spot.x, leadZ - spot.z);
+      const d = Math.min(dDirect, dLead);
+      const effectiveRadius = spot.radius + Math.max(16, sim.swath * 0.28);
+
+      if (d < effectiveRadius && sim.altitude < 38) {
+        // Low passes (6m - 20m AGL) deliver maximum slurry concentration
+        const altEfficiency =
+          sim.altitude <= 20
+            ? 1.15
+            : Math.max(0.55, 1.15 - (sim.altitude - 20) / 36);
+        const centerBonus = Math.max(0.5, 1.15 - (d / effectiveRadius) * 0.65);
+        const cooling = dt * 0.68 * altEfficiency * centerBonus;
+        const prevIntensity = spot.intensity;
         spot.intensity = Math.max(0, spot.intensity - cooling);
         extinguishedAny = true;
 
+        if (prevIntensity > 0.04 && spot.intensity <= 0.04 && !spot.contained) {
+          spot.intensity = 0;
+          spot.contained = true;
+          hotspotContained = spot;
+          // Burst of celebratory white steam on full hotspot knockdown
+          for (let s = 0; s < 10; s++) {
+            const ang = (s / 10) * Math.PI * 2 + Math.random() * 0.4;
+            const r = Math.random() * spot.radius * 0.7;
+            state.steamPuffs.push({
+              x: spot.x + Math.cos(ang) * r,
+              y: spot.y + 1.5 + Math.random() * 3,
+              z: spot.z + Math.sin(ang) * r,
+              vx: Math.cos(ang) * (3 + Math.random() * 4) + wind.x * 0.4,
+              vy: 9.0 + Math.random() * 7.5,
+              vz: Math.sin(ang) * (3 + Math.random() * 4) + wind.z * 0.4,
+              life: 0,
+              maxLife: 2.6 + Math.random() * 1.4,
+              scale: 5.5,
+            });
+          }
+        }
+
         // Spawn billowing steam puffs when retardant drops hit active flames
-        if (state.steamPuffs.length < 32 && Math.random() < dt * 18) {
+        if (state.steamPuffs.length < 48 && Math.random() < dt * 24) {
           state.steamPuffs.push({
-            x: spot.x + (Math.random() - 0.5) * spot.radius * 0.8,
-            y: spot.y + 1.2 + Math.random() * 2,
-            z: spot.z + (Math.random() - 0.5) * spot.radius * 0.8,
-            vx: (Math.random() - 0.5) * 3 + sim.windVector.x * 0.35,
-            vy: 6.5 + Math.random() * 5.0,
-            vz: (Math.random() - 0.5) * 3 + sim.windVector.z * 0.35,
+            x: spot.x + (Math.random() - 0.5) * spot.radius * 0.85,
+            y: spot.y + 1.2 + Math.random() * 2.5,
+            z: spot.z + (Math.random() - 0.5) * spot.radius * 0.85,
+            vx: (Math.random() - 0.5) * 3.5 + wind.x * 0.35,
+            vy: 7.0 + Math.random() * 5.5,
+            vz: (Math.random() - 0.5) * 3.5 + wind.z * 0.35,
             life: 0,
-            maxLife: 2.2 + Math.random() * 1.2,
-            scale: 3.5,
+            maxLife: 2.3 + Math.random() * 1.2,
+            scale: 4.0,
           });
         }
       }
@@ -177,7 +280,10 @@ export function stepFirefighting(
   // 3. Containment calculation
   const total = state.hotspots.length;
   const remaining = state.hotspots.reduce((sum, h) => sum + h.intensity, 0);
-  state.containedFraction = Math.max(0, Math.min(1, (total - remaining) / total));
+  state.containedFraction = Math.max(
+    0,
+    Math.min(1, (total - remaining) / total),
+  );
 
   if (state.containedFraction >= 0.95 && !state.completed) {
     state.completed = true;
@@ -203,7 +309,8 @@ export function stepFirefighting(
 
     // Proximity to flames (within 130m horizontal, 65m vertical)
     if (distXZ < 130 && dy > -5 && dy < 65) {
-      const prox = (1 - distXZ / 130) * (1 - Math.max(0, dy) / 65) * spot.intensity;
+      const prox =
+        (1 - distXZ / 130) * (1 - Math.max(0, dy) / 65) * spot.intensity;
       if (prox > maxProximity) maxProximity = prox;
     }
 
@@ -247,7 +354,11 @@ export function stepFirefighting(
   const targetExposure = Math.min(1, Math.max(0, maxSmokeExposure));
   state.smokeExposure = Math.max(
     0,
-    Math.min(1, (state.smokeExposure ?? 0) + (targetExposure - (state.smokeExposure ?? 0)) * Math.min(1, dt * 3.2)),
+    Math.min(
+      1,
+      (state.smokeExposure ?? 0) +
+        (targetExposure - (state.smokeExposure ?? 0)) * Math.min(1, dt * 3.2),
+    ),
   );
   state.thermalLift = maxThermalLift;
   state.proximityToFire = maxProximity;
@@ -256,5 +367,5 @@ export function stepFirefighting(
     (maxThermalLift / 4.6) * 0.85 + (state.smokeExposure > 0.25 ? 0.35 : 0),
   );
 
-  return { scooped, extinguishedAny };
+  return { scooped, extinguishedAny, hotspotContained };
 }

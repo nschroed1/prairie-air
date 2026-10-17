@@ -4,7 +4,6 @@ import {
   firefightingContract,
   freshFirefightingState,
   stepFirefighting,
-  getFireHotspots,
 } from '../lib/firefighting';
 import { Simulation, contracts, freshControls, ground, riverX } from '../lib/simulation';
 
@@ -60,9 +59,17 @@ void test('spraying retardant over hotspots reduces fire intensity and advances 
     sim.firefightingState.waterTank < 100,
     'Water tank should deplete during retardant discharge',
   );
+  assert.ok(
+    Math.abs(sim.tank - sim.firefightingState.waterTank) < 1e-6,
+    'sim.tank should stay synchronized with firefightingState.waterTank',
+  );
+  assert.ok(
+    sim.firefightingState.retardantDrops.length > 0,
+    'Retardant drop decals should be recorded on the ground',
+  );
 });
 
-void test('skimming Cedar River below 4.5m AGL scoops water and refills tank', () => {
+void test('skimming Cedar River or Cedar Valley Dip Basin below 7.8m AGL scoops water without crashing', () => {
   const sim = new Simulation();
   sim.phase = 'flying';
   sim.speed = 35;
@@ -73,7 +80,7 @@ void test('skimming Cedar River below 4.5m AGL scoops water and refills tank', (
   // Deplete water tank
   sim.firefightingState.waterTank = 10;
 
-  // Fly low over Cedar River at z = 100
+  // 1. Fly low over Cedar River at z = 100
   sim.z = 100;
   sim.x = riverX(100);
   sim.y = ground(sim.x, sim.z) + 3.8; // ~3.8m above river surface
@@ -82,6 +89,17 @@ void test('skimming Cedar River below 4.5m AGL scoops water and refills tank', (
   assert.equal(result.scooped, true);
   assert.equal(sim.firefightingState.isScooping, true);
   assert.ok(sim.firefightingState.waterTank > 10, 'Tank should gain water while skimming river');
+
+  // 2. Step full simulation over Cedar Valley Dip Basin (-165, 225) at 4.0m AGL
+  const prevTank = sim.firefightingState.waterTank;
+  sim.x = -165;
+  sim.z = 225;
+  sim.y = ground(sim.x, sim.z) + 4.0;
+  sim.pitch = 0;
+  sim.roll = 0;
+  sim.step(0.05, freshControls());
+  assert.equal(sim.phase, 'flying', 'Low scoop pass over Dip Basin should not trigger terrain crash');
+  assert.ok(sim.firefightingState.waterTank > prevTank, 'Dip Basin skim should refill waterTank');
 });
 
 void test('smoke exposure and downwind plume reduce visibility when cutting through smoke', () => {

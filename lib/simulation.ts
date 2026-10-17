@@ -783,6 +783,9 @@ export class Simulation {
     this.inBarn = this.inBarnInverted = false;
     this.arcade.reset();
     this.tank = this.tankCapacity;
+    if (this.firefightingState) {
+      this.firefightingState.waterTank = this.firefightingState.waterCapacity;
+    }
     this.lineUp();
     this.phase = 'flying';
     this.spraying = false;
@@ -839,7 +842,11 @@ export class Simulation {
       const contained = this.firefightingState.containedFraction;
       const speedBonus = this.elapsed < 140 ? 150 : 0;
       const bonus = contained >= 1.0 ? this.job.bonus : 150;
-      const gross = Math.max(0, this.job.pay + bonus + speedBonus);
+      const stunt = this.result.stuntBonus ?? 0;
+      const gross = Math.max(
+        0,
+        this.job.pay + bonus + speedBonus + this.pendingSkillBonus,
+      );
       this.result = {
         pay: this.job.pay,
         bonus,
@@ -850,7 +857,7 @@ export class Simulation {
         repairs: 0,
         debt: this.serviceDue,
         oversprayAcres: 0,
-        stuntBonus: 0,
+        stuntBonus: stunt,
         cleanBonus: 0,
         speedBonus,
       };
@@ -1054,9 +1061,12 @@ export class Simulation {
       (Math.sin(this.pitch) * this.speed + groundCushion + thermalUpdraft) * dt -
       stallSink;
     this.y = Math.min(this.y, 600);
+    const minSafeAltitude = this.isFirefighting ? 2.0 : 3.0;
     if (
-      this.altitude < 3 ||
-      (Math.abs(this.x - riverX(this.z)) < 40 && this.y < 10)
+      this.altitude < minSafeAltitude ||
+      (!this.isFirefighting &&
+        Math.abs(this.x - riverX(this.z)) < 40 &&
+        this.y < 10)
     ) {
       this.crash('Terrain strike · climb early over hills and riverbanks.');
       return;
@@ -1094,6 +1104,12 @@ export class Simulation {
           this.lastCollectedCue = 'coin';
         } else if (c.kind === 'refill') {
           this.tank = Math.min(this.tankCapacity, this.tank + c.value);
+          if (this.firefightingState) {
+            this.firefightingState.waterTank = Math.min(
+              this.firefightingState.waterCapacity,
+              this.firefightingState.waterTank + c.value,
+            );
+          }
           this.lastCollectedCue = 'powerup';
         }
         if (c.kind === 'refill') {
@@ -1112,7 +1128,11 @@ export class Simulation {
       this.heading = Math.atan2(-this.x, this.z);
       this.message = 'County boundary · turning you toward home';
     } else this.message = '';
-    this.spraying = input.spray && this.tank > 0;
+    const hasPayload =
+      this.isFirefighting && this.firefightingState
+        ? this.firefightingState.waterTank > 0
+        : this.tank > 0;
+    this.spraying = input.spray && hasPayload;
     if (this.isRally) {
       if (this.rallyState) {
         const { gatePassed, stuntEarned } = stepRally(
@@ -1138,16 +1158,31 @@ export class Simulation {
     }
     if (this.isFirefighting) {
       if (this.firefightingState) {
-        const { scooped, extinguishedAny } = stepFirefighting(
+        const { scooped, extinguishedAny, hotspotContained } = stepFirefighting(
           this.firefightingState,
           this,
           dt,
         );
+        this.tank =
+          (this.firefightingState.waterTank /
+            this.firefightingState.waterCapacity) *
+          this.tankCapacity;
+        this.spraying = input.spray && this.firefightingState.waterTank > 0;
         if (scooped) {
-          this.tank = Math.min(this.tankCapacity, this.tank + dt * 35);
           achievementManager.addProgress('river_scooper', dt * 0.35);
         }
-        if (extinguishedAny && !this.lastStuntCue) {
+        if (hotspotContained) {
+          const spotTitle = hotspotContained.name
+            ? `${hotspotContained.name} Knocked Down!`
+            : `Hotspot #${hotspotContained.id + 1} Contained!`;
+          this.awardReward(
+            spotTitle,
+            100,
+            'cash-register',
+            `hotspot:${hotspotContained.id}`,
+          );
+          this.lastStuntCue = 'steam-hiss';
+        } else if (extinguishedAny && !this.lastStuntCue) {
           this.lastStuntCue = 'steam-hiss';
         }
       }

@@ -121,7 +121,7 @@ import { tandemContract, TandemAiPartner } from '@/lib/tandem';
 import { DustOffHud } from '@/components/dust-off-hud';
 import { RallyHud } from '@/components/rally-hud';
 import { TandemHud } from '@/components/tandem-hud';
-import { firefightingContract } from '@/lib/firefighting';
+import { CEDAR_DIP_POND, firefightingContract } from '@/lib/firefighting';
 import { FirefightingHud } from '@/components/firefighting-hud';
 import { SmokeVignetteOverlay } from '@/components/smoke-vignette-overlay';
 import { FlightVideoRecorder } from '@/lib/video-recorder';
@@ -1065,27 +1065,37 @@ export default function Home() {
         : 'Free flight · explore the county or claim a contract'
     : sim.isSkywriting
       ? skyGuidance(sim.job, sim.skywriting, sim.y, sim.tank)
-    : sim.overspraying
-      ? 'Overspray · release spray to stop the penalty'
-      : sim.tank <= 0
-        ? 'Tank empty · press R to refill'
-        : sim.altitude > 30
-          ? 'Descend below 98 ft to spray'
-          : sim.altitude < 6
-            ? 'Too low · climb above 20 ft'
-            : Math.abs(sim.roll) > 0.52
-              ? 'Level your wings to spray'
-              : sim.speed >= 61
-                ? 'Slow below 136 mph'
-                : sim.spraying
-                  ? sim.inField
-                    ? 'Good pass · applying treatment'
-                    : 'Outside your field · keep spray off'
-                  : safety === 'outside'
-                    ? 'Outside spray footprint · keep spray off'
-                    : safety === 'edge'
-                      ? 'Field edge ahead · release Space'
-                      : 'Green footprint · ready to spray';
+      : sim.isFirefighting
+        ? sim.firefightingState?.isScooping
+          ? 'Hydro-scoop active · skimming water into retardant tank'
+          : (sim.firefightingState?.waterTank ?? sim.tank) <= 0
+            ? 'Retardant tank empty · skim Cedar Dip Basin (< 26 ft) or press R'
+            : sim.altitude > 36
+              ? 'Descend below 115 ft AGL for effective retardant drop'
+              : sim.spraying
+                ? 'Dropping Phos-Chek slurry · lead the hotspots slightly'
+                : 'Air Tanker armed · fly over hotspots (< 115 ft) and hold Space'
+        : sim.overspraying
+          ? 'Overspray · release spray to stop the penalty'
+          : sim.tank <= 0
+            ? 'Tank empty · press R to refill'
+            : sim.altitude > 30
+              ? 'Descend below 98 ft to spray'
+              : sim.altitude < 6
+                ? 'Too low · climb above 20 ft'
+                : Math.abs(sim.roll) > 0.52
+                  ? 'Level your wings to spray'
+                  : sim.speed >= 61
+                    ? 'Slow below 136 mph'
+                    : sim.spraying
+                      ? sim.inField
+                        ? 'Good pass · applying treatment'
+                        : 'Outside your field · keep spray off'
+                      : safety === 'outside'
+                        ? 'Outside spray footprint · keep spray off'
+                        : safety === 'edge'
+                          ? 'Field edge ahead · release Space'
+                          : 'Green footprint · ready to spray';
   return (
     <main
       className={`game-shell ${reducedMotion ? 'reduced-motion' : ''} ${active ? 'flight-active' : ''} ${sim.isSkywriting ? 'skywriting-active' : ''} ${sim.isSkywriting && sim.phase === 'complete' ? 'skywriting-reveal' : ''}`}
@@ -1415,12 +1425,18 @@ export default function Home() {
                 </p>
               </div>
               <span className="crop-icon">
-                <Sprout size={24} />
+                {sim.isFirefighting ? (
+                  <Flame size={24} />
+                ) : (
+                  <Sprout size={24} />
+                )}
               </span>
             </div>
             <div className="mission-details">
               <span>
-                {sim.job.acres} acres of {sim.job.crop}
+                {sim.isFirefighting
+                  ? `${sim.job.acres} acres · Timber Ridge`
+                  : `${sim.job.acres} acres of ${sim.job.crop}`}
               </span>
               <span>·</span>
               <span>{sim.job.treatment}</span>
@@ -1428,14 +1444,32 @@ export default function Home() {
             {active ? (
               <>
                 <div className="coverage-label">
-                  <span>Field coverage</span>
+                  <span>
+                    {sim.isFirefighting
+                      ? 'Wildfire containment'
+                      : 'Field coverage'}
+                  </span>
                   <strong>
-                    {sim.coverage.toFixed(1)}
+                    {(sim.isFirefighting
+                      ? (sim.firefightingState?.containedFraction ?? 0) * 100
+                      : sim.coverage
+                    ).toFixed(1)}
                     <small>%</small>
                   </strong>
                 </div>
                 <div className="coverage-track">
-                  <Progress value={sim.coverage} aria-label="Field coverage" />
+                  <Progress
+                    value={
+                      sim.isFirefighting
+                        ? (sim.firefightingState?.containedFraction ?? 0) * 100
+                        : sim.coverage
+                    }
+                    aria-label={
+                      sim.isFirefighting
+                        ? 'Wildfire containment'
+                        : 'Field coverage'
+                    }
+                  />
                   <span
                     className="target-mark"
                     style={{ left: `${sim.job.target}%` }}
@@ -1466,7 +1500,30 @@ export default function Home() {
             {active &&
               (mode === 'practice' ||
                 county?.player?.activeJob ||
-                sim.phase === 'complete') && (
+                sim.phase === 'complete') &&
+              (sim.isFirefighting && sim.firefightingState ? (
+                <div className="overspray-summary">
+                  <div>
+                    <span>Active Hotspots</span>
+                    <strong>
+                      {
+                        sim.firefightingState.hotspots.filter(
+                          (h) => h.intensity > 0.06,
+                        ).length
+                      }{' '}
+                      / {sim.firefightingState.hotspots.length}
+                    </strong>
+                  </div>
+                  <div>
+                    <span>Scoop Reservoir</span>
+                    <strong>Cedar Dip Basin</strong>
+                  </div>
+                  <small>
+                    Skim Dip Basin (&lt; 26 ft AGL) East of ridge to refill
+                    slurry
+                  </small>
+                </div>
+              ) : !sim.isRally ? (
                 <div
                   className={`overspray-summary ${sim.oversprayPenalty > 0 ? 'has-penalty' : ''}`}
                 >
@@ -1482,7 +1539,7 @@ export default function Home() {
                     {money(OVERSPRAY_PENALTY_PER_ACRE)}/ac outside your field
                   </small>
                 </div>
-              )}
+              ) : null)}
             {active && sim.completionReady && fly && (
               <button className="primary claim" onClick={finish}>
                 Complete contract
@@ -1546,19 +1603,23 @@ export default function Home() {
       )}
       {active && hasAssignment && (
         <div className="guidance-panel">
-          <button
-            className="guide-toggle"
-            aria-pressed={guideEnabled}
-            onClick={() => setGuideEnabled((v) => !v)}
-          >
-            <Crosshair size={15} />
-            Flight guide {guideEnabled ? 'on' : 'off'}
-          </button>
+          {!sim.isFirefighting && !sim.isRally && (
+            <button
+              className="guide-toggle"
+              aria-pressed={guideEnabled}
+              onClick={() => setGuideEnabled((v) => !v)}
+            >
+              <Crosshair size={15} />
+              Flight guide {guideEnabled ? 'on' : 'off'}
+            </button>
+          )}
           {sim.phase !== 'complete' && <ChallengeHUD sim={sim} />}
           {!panel &&
             sim.phase === 'flying' &&
             guideEnabled &&
             !sim.isSkywriting &&
+            !sim.isFirefighting &&
+            !sim.isRally &&
             sim.career.flights < 2 && (
               <FlightCoach
                 sim={sim}
@@ -1574,7 +1635,7 @@ export default function Home() {
       {active && (
         <>
           <div
-            className={`flight-message ${mode === 'public' && !county?.player?.activeJob ? '' : sim.hazardEvent && sim.hazardEvent.includes('BARNSTORMER') && sim.elapsed < sim.hazardEventUntil ? 'spray-stunt' : sim.overspraying ? 'spray-bad' : sim.spraying && sim.validSpray && sim.inField ? 'spray-good' : ''}`}
+            className={`flight-message ${mode === 'public' && !county?.player?.activeJob ? '' : sim.hazardEvent && sim.hazardEvent.includes('BARNSTORMER') && sim.elapsed < sim.hazardEventUntil ? 'spray-stunt' : sim.overspraying ? 'spray-bad' : sim.spraying && (sim.isFirefighting || (sim.validSpray && sim.inField)) ? 'spray-good' : ''}`}
           >
             <span className="live-dot" />
             {mode === 'public' && !county?.player?.activeJob
@@ -1584,48 +1645,52 @@ export default function Home() {
                 : sim.message || sprayMessage}
           </div>
           {/* Agricultural GPS Lightbar (CDI) */}
-          {!sim.isSkywriting && sim.phase === 'flying' && (() => {
-            const isLocked = world.current?.arcadeFx?.isSwathLocked() ?? false;
-            const offset = world.current?.arcadeFx?.getSwathOffset() ?? Infinity;
-            const signed = world.current?.arcadeFx?.getSignedSwathOffset() ?? 0;
-            const hasFix = Number.isFinite(offset) && offset < 50;
-            if (!hasFix) return null;
-            const pips = [-4, -3, -2, -1, 0, 1, 2, 3, 4];
-            return (
-              <div
-                className={`cdi-lightbar ${isLocked ? 'locked' : ''}`}
-                role="status"
-                aria-label={`GPS Lightbar: ${isLocked ? 'Locked on swath' : `${offset.toFixed(1)}m ${signed > 0 ? 'right' : 'left'}`}`}
-              >
-                <span className={`cdi-arrow cdi-arrow-left ${signed > 0.8 ? 'active' : ''}`}>◀</span>
-                <div className="cdi-pips">
-                  {pips.map((p) => {
-                    const isCenter = p === 0;
-                    let active = false;
-                    if (isCenter) {
-                      active = isLocked;
-                    } else if (p < 0) {
-                      const thresh = p === -1 ? 1.5 : p === -2 ? 3.0 : p === -3 ? 5.5 : 9.0;
-                      active = signed >= thresh;
-                    } else {
-                      const thresh = p === 1 ? -1.5 : p === 2 ? -3.0 : p === 3 ? -5.5 : -9.0;
-                      active = signed <= thresh;
-                    }
-                    return (
-                      <span
-                        key={p}
-                        className={`cdi-pip ${isCenter ? 'pip-center' : ''} ${active ? 'active' : ''}`}
-                      />
-                    );
-                  })}
+          {!sim.isSkywriting &&
+            !sim.isFirefighting &&
+            !sim.isRally &&
+            sim.phase === 'flying' &&
+            (() => {
+              const isLocked = world.current?.arcadeFx?.isSwathLocked() ?? false;
+              const offset = world.current?.arcadeFx?.getSwathOffset() ?? Infinity;
+              const signed = world.current?.arcadeFx?.getSignedSwathOffset() ?? 0;
+              const hasFix = Number.isFinite(offset) && offset < 50;
+              if (!hasFix) return null;
+              const pips = [-4, -3, -2, -1, 0, 1, 2, 3, 4];
+              return (
+                <div
+                  className={`cdi-lightbar ${isLocked ? 'locked' : ''}`}
+                  role="status"
+                  aria-label={`GPS Lightbar: ${isLocked ? 'Locked on swath' : `${offset.toFixed(1)}m ${signed > 0 ? 'right' : 'left'}`}`}
+                >
+                  <span className={`cdi-arrow cdi-arrow-left ${signed > 0.8 ? 'active' : ''}`}>◀</span>
+                  <div className="cdi-pips">
+                    {pips.map((p) => {
+                      const isCenter = p === 0;
+                      let active = false;
+                      if (isCenter) {
+                        active = isLocked;
+                      } else if (p < 0) {
+                        const thresh = p === -1 ? 1.5 : p === -2 ? 3.0 : p === -3 ? 5.5 : 9.0;
+                        active = signed >= thresh;
+                      } else {
+                        const thresh = p === 1 ? -1.5 : p === 2 ? -3.0 : p === 3 ? -5.5 : -9.0;
+                        active = signed <= thresh;
+                      }
+                      return (
+                        <span
+                          key={p}
+                          className={`cdi-pip ${isCenter ? 'pip-center' : ''} ${active ? 'active' : ''}`}
+                        />
+                      );
+                    })}
+                  </div>
+                  <span className={`cdi-arrow cdi-arrow-right ${signed < -0.8 ? 'active' : ''}`}>▶</span>
+                  <span className="cdi-label">
+                    {isLocked ? 'LOCKED' : `${offset.toFixed(1)}m ${signed > 0 ? 'R' : 'L'}`}
+                  </span>
                 </div>
-                <span className={`cdi-arrow cdi-arrow-right ${signed < -0.8 ? 'active' : ''}`}>▶</span>
-                <span className="cdi-label">
-                  {isLocked ? 'LOCKED' : `${offset.toFixed(1)}m ${signed > 0 ? 'R' : 'L'}`}
-                </span>
-              </div>
-            );
-          })()}
+              );
+            })()}
           <div
             className={`reticle ${
               world.current?.arcadeFx?.isSwathLocked()
@@ -1827,7 +1892,9 @@ export default function Home() {
                   (
                     sim.isSkywriting
                       ? Math.abs(sim.y - sim.job.skywriting!.altitude) > 14
-                      : sim.altitude < 6 || sim.altitude > 30
+                      : sim.isFirefighting
+                        ? sim.altitude < 2.2 || sim.altitude > 36
+                        : sim.altitude < 6 || sim.altitude > 30
                   )
                     ? 'warning'
                     : ''
@@ -1839,24 +1906,38 @@ export default function Home() {
               <span className="altitude-hint">
                 {sim.isSkywriting
                   ? `GATE ${Math.round(Math.abs(sim.job.skywriting!.altitude - sim.y) * 3.281)} FT ${sim.job.skywriting!.altitude >= sim.y ? 'ABOVE' : 'BELOW'}`
-                  : 'SWEET SPOT 20–98 FT'}
+                  : sim.isFirefighting
+                    ? 'DROP < 115 FT · SCOOP < 26 FT'
+                    : 'SWEET SPOT 20–98 FT'}
               </span>
             </div>
             <div>
-              <small>{sim.isSkywriting ? 'SMOKE TANK' : 'SPRAY TANK'}</small>
+              <small>
+                {sim.isSkywriting
+                  ? 'SMOKE TANK'
+                  : sim.isFirefighting
+                    ? 'RETARDANT TANK'
+                    : 'SPRAY TANK'}
+              </small>
               <strong>
                 {Math.round((sim.tank / sim.tankCapacity) * 100)}
                 <span>%</span>
               </strong>
               <Progress
                 value={(sim.tank / sim.tankCapacity) * 100}
-                aria-label={sim.isSkywriting ? 'Smoke tank' : 'Spray tank'}
+                aria-label={
+                  sim.isSkywriting
+                    ? 'Smoke tank'
+                    : sim.isFirefighting
+                      ? 'Retardant tank'
+                      : 'Spray tank'
+                }
               />
               {sim.tank < sim.tankCapacity && (
                 <button
                   type="button"
                   className="hud-refill-btn"
-                  title="Refill chemical tank (R)"
+                  title="Refill tank (R)"
                   onClick={() => {
                     if (mode === 'public') void onlineAction('refill');
                     else sim.refill();
@@ -1876,15 +1957,23 @@ export default function Home() {
               onPointerUp={() => (manualControls.current.spray = false)}
               onPointerCancel={() => (manualControls.current.spray = false)}
             >
-              <Droplets size={19} />
+              {sim.isFirefighting ? (
+                <Flame size={19} />
+              ) : (
+                <Droplets size={19} />
+              )}
               <span>
                 {sim.isSkywriting
                   ? sim.spraying
                     ? 'WRITING'
                     : 'HOLD TO WRITE'
-                  : sim.spraying
-                    ? 'SPRAYING'
-                    : 'HOLD TO SPRAY'}
+                  : sim.isFirefighting
+                    ? sim.spraying
+                      ? 'DROPPING SLURRY'
+                      : 'DROP RETARDANT'
+                    : sim.spraying
+                      ? 'SPRAYING'
+                      : 'HOLD TO SPRAY'}
               </span>
               <kbd>SPACE</kbd>
             </button>
@@ -1992,7 +2081,11 @@ export default function Home() {
         <div>
           <span>
             <span className="live-dot" />{' '}
-            {sim.isSkywriting ? 'HEART ROUTE' : `${mapZoom.toUpperCase()} MAP`}
+            {sim.isSkywriting
+              ? 'HEART ROUTE'
+              : sim.isFirefighting
+                ? 'FIRE RADAR'
+                : `${mapZoom.toUpperCase()} MAP`}
           </span>
           <button
             type="button"
@@ -2034,10 +2127,23 @@ export default function Home() {
           }
         />
         <footer>
-          <span className="map-key" /> {sim.isSkywriting ? 'Heart' : 'Field'}{' '}
-          <span className="map-plane">✦</span> You{' '}
-          <span style={{ color: '#ffd166', marginLeft: 6 }}>●</span>{' '}
-          {sim.isSkywriting ? 'Next gate' : 'Token'}
+          {sim.isFirefighting ? (
+            <>
+              <span style={{ color: '#f97316', marginRight: 4 }}>●</span> Fire{' '}
+              <span style={{ color: '#38bdf8', marginLeft: 6, marginRight: 4 }}>
+                ●
+              </span>{' '}
+              Scoop Basin <span className="map-plane">✦</span> You
+            </>
+          ) : (
+            <>
+              <span className="map-key" />{' '}
+              {sim.isSkywriting ? 'Heart' : 'Field'}{' '}
+              <span className="map-plane">✦</span> You{' '}
+              <span style={{ color: '#ffd166', marginLeft: 6 }}>●</span>{' '}
+              {sim.isSkywriting ? 'Next gate' : 'Token'}
+            </>
+          )}
         </footer>
       </aside>
       {active && (
@@ -2682,10 +2788,12 @@ function drawMap(
     drawSkyMap(ctx, w, h, sim, guideEnabled);
     return;
   }
-  const tacticalScale = Math.min(
-    w / (fieldSize(sim.job).width + 150),
-    h / (fieldSize(sim.job).depth + 150),
-  );
+  const tacticalScale = sim.isFirefighting
+    ? 0.42
+    : Math.min(
+        w / (fieldSize(sim.job).width + 150),
+        h / (fieldSize(sim.job).depth + 150),
+      );
   const scale =
     sim.phase === 'ready'
       ? 0.13
@@ -2694,8 +2802,8 @@ function drawMap(
         : mapZoom === 'sector'
           ? tacticalScale * 0.44
           : tacticalScale;
-  const cx = sim.job.x,
-    cz = sim.job.z;
+  const cx = sim.isFirefighting ? -280 : sim.job.x,
+    cz = sim.isFirefighting ? 225 : sim.job.z;
   const px = (x: number) => (x - cx) * scale + w / 2,
     pz = (z: number) => (z - cz) * scale + h / 2;
   ctx.fillStyle = '#354e37';
@@ -2831,125 +2939,196 @@ function drawMap(
       ctx.fillText('YEW AVE STRIP', hx, hz - 8);
     }
   }
-  ctx.fillStyle = '#c5dd6540';
-  polygonPath(sim.job);
-  ctx.fill();
-  ctx.save();
-  ctx.clip();
-  ctx.fillStyle = 'rgba(138, 226, 68, 0.72)';
-  const boxDim = 12 * scale;
-  sim.covered.forEach((n) =>
-    ctx.fillRect(
-      px(sim.job.x - 228 + (n % 38) * 12),
-      pz(sim.job.z - 228 + Math.floor(n / 38) * 12),
-      boxDim,
-      boxDim,
-    ),
-  );
-  if (boxDim >= 2.2) {
-    ctx.strokeStyle = 'rgba(255, 255, 255, 0.38)';
-    ctx.lineWidth = Math.min(1, Math.max(0.5, boxDim * 0.1));
-    sim.covered.forEach((n) =>
-      ctx.strokeRect(
-        px(sim.job.x - 228 + (n % 38) * 12) + 0.5,
-        pz(sim.job.z - 228 + Math.floor(n / 38) * 12) + 0.5,
-        Math.max(1, boxDim - 1),
-        Math.max(1, boxDim - 1),
-      ),
-    );
-  }
-  ctx.restore();
-  for (const zone of sim.job.noSprayZones ?? []) {
-    ctx.fillStyle = '#583c2d';
-    ctx.strokeStyle = '#ffd28a';
-    ctx.lineWidth = 1.5;
-    const x = px(sim.job.x + zone.x - zone.width / 2),
-      z = pz(sim.job.z + zone.z - zone.depth / 2);
-    ctx.fillRect(x, z, zone.width * scale, zone.depth * scale);
-    ctx.strokeRect(x, z, zone.width * scale, zone.depth * scale);
-    const kind = (zone as { kind?: string }).kind;
-    const cx = px(sim.job.x + zone.x),
-      cz = pz(sim.job.z + zone.z);
-    if (kind === 'barn') {
-      const bw = Math.max(8, 18 * scale),
-        bh = Math.max(6, 13 * scale);
-      ctx.fillStyle = '#9e2b1b';
-      ctx.fillRect(cx - bw / 2, cz - bh / 2, bw, bh);
-      ctx.fillStyle = '#eae3d2';
-      ctx.beginPath();
-      ctx.moveTo(cx - bw / 2 - 1, cz - bh / 2);
-      ctx.lineTo(cx, cz - bh / 2 - Math.max(3, 5 * scale));
-      ctx.lineTo(cx + bw / 2 + 1, cz - bh / 2);
-      ctx.closePath();
-      ctx.fill();
-    }
-  }
-  const bird = birdFlock(sim.job, sim.elapsed),
-    swarm = locustSwarm(sim.job, sim.elapsed),
-    tornado = tornadoState(sim.job, sim.elapsed);
-  for (const [point, radius, color] of [
-    [bird, 18, '#fff2c6'],
-    [swarm, 58, '#cbda63'],
-    [tornado, 220, '#ff9b67'],
-  ] as const) {
-    if (!point) continue;
-    ctx.strokeStyle = color;
-    ctx.fillStyle = color + '33';
-    ctx.lineWidth = 1.5;
+  if (sim.isFirefighting && sim.firefightingState) {
+    // 1. Cedar Valley Dip Basin (Water Scooping Reservoir)
+    const pondX = px(CEDAR_DIP_POND.x);
+    const pondZ = pz(CEDAR_DIP_POND.z);
+    const pondR = Math.max(6, CEDAR_DIP_POND.radius * scale);
+    ctx.save();
     ctx.beginPath();
-    ctx.arc(
-      px(point.x),
-      pz(point.z),
-      Math.max(3, radius * scale),
-      0,
-      Math.PI * 2,
-    );
+    ctx.arc(pondX, pondZ, pondR, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(14, 165, 233, 0.55)';
+    ctx.strokeStyle = '#38bdf8';
+    ctx.lineWidth = 2;
     ctx.fill();
     ctx.stroke();
-  }
-  ctx.setLineDash([4, 3]);
-  ctx.lineWidth = 1.5;
-  ctx.strokeStyle = '#d1e795';
-  polygonPath(sim.job);
-  ctx.stroke();
-  ctx.setLineDash([]);
-  if (guideEnabled && (sim.phase === 'flying' || sim.phase === 'paused')) {
-    const pass = nextPass(sim);
-    ctx.strokeStyle = '#ffffff';
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    const guideX = pass.x - sim.sprayDrift;
-    let drawing = false;
-    for (let z = pass.maxZ; z >= pass.minZ; z -= 4) {
-      const protectedYard = sim.job.noSprayZones?.some(
-        (zone) =>
-          Math.abs(guideX - sim.job.x - zone.x) <= zone.width / 2 &&
-          Math.abs(z - sim.job.z - zone.z) <= zone.depth / 2,
-      );
-      if (protectedYard) {
-        drawing = false;
-        continue;
-      }
-      if (!drawing) ctx.moveTo(px(guideX), pz(z));
-      else ctx.lineTo(px(guideX), pz(z));
-      drawing = true;
+
+    ctx.font = 'bold 8.5px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillStyle = '#bae6fd';
+    ctx.fillText('DIP BASIN', pondX, pondZ - pondR - 5);
+    ctx.restore();
+
+    // 2. Crimson Phos-Chek Retardant Drops
+    for (const drop of sim.firefightingState.retardantDrops) {
+      const dx = px(drop.x);
+      const dz = pz(drop.z);
+      const dr = Math.max(2.5, drop.radius * scale * 0.75);
+      ctx.beginPath();
+      ctx.arc(dx, dz, dr, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(244, 63, 94, 0.55)';
+      ctx.fill();
     }
+
+    // 3. Wildfire Hotspots (H1..H6)
+    for (const spot of sim.firefightingState.hotspots) {
+      const sx = px(spot.x);
+      const sz = pz(spot.z);
+      const sr = Math.max(5, spot.radius * scale);
+      const isOut = spot.intensity <= 0.06;
+
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(sx, sz, sr, 0, Math.PI * 2);
+      if (isOut) {
+        ctx.fillStyle = 'rgba(16, 185, 129, 0.25)';
+        ctx.strokeStyle = '#10b981';
+        ctx.lineWidth = 1.5;
+      } else {
+        ctx.fillStyle = `rgba(239, 68, 68, ${0.28 + spot.intensity * 0.42})`;
+        ctx.strokeStyle = spot.intensity > 0.5 ? '#f97316' : '#facc15';
+        ctx.lineWidth = 2;
+      }
+      ctx.fill();
+      ctx.stroke();
+
+      if (!isOut) {
+        ctx.beginPath();
+        ctx.arc(sx, sz, Math.max(2.5, sr * 0.42 * spot.intensity), 0, Math.PI * 2);
+        ctx.fillStyle = '#fef08a';
+        ctx.fill();
+      }
+
+      ctx.font = 'bold 8.5px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillStyle = isOut ? '#6ee7b7' : '#ffffff';
+      ctx.shadowColor = '#000000';
+      ctx.shadowBlur = 3;
+      ctx.fillText(`H${spot.id + 1}`, sx, sz - sr - 5);
+      ctx.restore();
+    }
+  } else if (!sim.isRally) {
+    ctx.fillStyle = '#c5dd6540';
+    polygonPath(sim.job);
+    ctx.fill();
+    ctx.save();
+    ctx.clip();
+    ctx.fillStyle = 'rgba(138, 226, 68, 0.72)';
+    const boxDim = 12 * scale;
+    sim.covered.forEach((n) =>
+      ctx.fillRect(
+        px(sim.job.x - 228 + (n % 38) * 12),
+        pz(sim.job.z - 228 + Math.floor(n / 38) * 12),
+        boxDim,
+        boxDim,
+      ),
+    );
+    if (boxDim >= 2.2) {
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.38)';
+      ctx.lineWidth = Math.min(1, Math.max(0.5, boxDim * 0.1));
+      sim.covered.forEach((n) =>
+        ctx.strokeRect(
+          px(sim.job.x - 228 + (n % 38) * 12) + 0.5,
+          pz(sim.job.z - 228 + Math.floor(n / 38) * 12) + 0.5,
+          Math.max(1, boxDim - 1),
+          Math.max(1, boxDim - 1),
+        ),
+      );
+    }
+    ctx.restore();
+    for (const zone of sim.job.noSprayZones ?? []) {
+      ctx.fillStyle = '#583c2d';
+      ctx.strokeStyle = '#ffd28a';
+      ctx.lineWidth = 1.5;
+      const x = px(sim.job.x + zone.x - zone.width / 2),
+        z = pz(sim.job.z + zone.z - zone.depth / 2);
+      ctx.fillRect(x, z, zone.width * scale, zone.depth * scale);
+      ctx.strokeRect(x, z, zone.width * scale, zone.depth * scale);
+      const kind = (zone as { kind?: string }).kind;
+      const cx = px(sim.job.x + zone.x),
+        cz = pz(sim.job.z + zone.z);
+      if (kind === 'barn') {
+        const bw = Math.max(8, 18 * scale),
+          bh = Math.max(6, 13 * scale);
+        ctx.fillStyle = '#9e2b1b';
+        ctx.fillRect(cx - bw / 2, cz - bh / 2, bw, bh);
+        ctx.fillStyle = '#eae3d2';
+        ctx.beginPath();
+        ctx.moveTo(cx - bw / 2 - 1, cz - bh / 2);
+        ctx.lineTo(cx, cz - bh / 2 - Math.max(3, 5 * scale));
+        ctx.lineTo(cx + bw / 2 + 1, cz - bh / 2);
+        ctx.closePath();
+        ctx.fill();
+      }
+    }
+    const bird = birdFlock(sim.job, sim.elapsed),
+      swarm = locustSwarm(sim.job, sim.elapsed),
+      tornado = tornadoState(sim.job, sim.elapsed);
+    for (const [point, radius, color] of [
+      [bird, 18, '#fff2c6'],
+      [swarm, 58, '#cbda63'],
+      [tornado, 220, '#ff9b67'],
+    ] as const) {
+      if (!point) continue;
+      ctx.strokeStyle = color;
+      ctx.fillStyle = color + '33';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.arc(
+        px(point.x),
+        pz(point.z),
+        Math.max(3, radius * scale),
+        0,
+        Math.PI * 2,
+      );
+      ctx.fill();
+      ctx.stroke();
+    }
+    ctx.setLineDash([4, 3]);
+    ctx.lineWidth = 1.5;
+    ctx.strokeStyle = '#d1e795';
+    polygonPath(sim.job);
     ctx.stroke();
-    const footprint = sprayFootprint(sim),
-      safety = spraySafety(sim);
-    ctx.strokeStyle =
-      safety === 'outside'
-        ? '#ff8870'
-        : safety === 'edge'
-          ? '#ffc75e'
-          : '#b9ff7a';
-    ctx.beginPath();
-    footprint.forEach((point, i) => {
-      if (i === 0) ctx.moveTo(px(point.x), pz(point.z));
-      else ctx.lineTo(px(point.x), pz(point.z));
-    });
-    ctx.closePath();
-    ctx.stroke();
+    ctx.setLineDash([]);
+    if (guideEnabled && (sim.phase === 'flying' || sim.phase === 'paused')) {
+      const pass = nextPass(sim);
+      ctx.strokeStyle = '#ffffff';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      const guideX = pass.x - sim.sprayDrift;
+      let drawing = false;
+      for (let z = pass.maxZ; z >= pass.minZ; z -= 4) {
+        const protectedYard = sim.job.noSprayZones?.some(
+          (zone) =>
+            Math.abs(guideX - sim.job.x - zone.x) <= zone.width / 2 &&
+            Math.abs(z - sim.job.z - zone.z) <= zone.depth / 2,
+        );
+        if (protectedYard) {
+          drawing = false;
+          continue;
+        }
+        if (!drawing) ctx.moveTo(px(guideX), pz(z));
+        else ctx.lineTo(px(guideX), pz(z));
+        drawing = true;
+      }
+      ctx.stroke();
+      const footprint = sprayFootprint(sim),
+        safety = spraySafety(sim);
+      ctx.strokeStyle =
+        safety === 'outside'
+          ? '#ff8870'
+          : safety === 'edge'
+            ? '#ffc75e'
+            : '#b9ff7a';
+      ctx.beginPath();
+      footprint.forEach((point, i) => {
+        if (i === 0) ctx.moveTo(px(point.x), pz(point.z));
+        else ctx.lineTo(px(point.x), pz(point.z));
+      });
+      ctx.closePath();
+      ctx.stroke();
+    }
   }
   // Draw uncollected tokens
   for (const c of sim.collectibles) {

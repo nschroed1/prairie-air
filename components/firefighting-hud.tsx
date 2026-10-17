@@ -1,8 +1,19 @@
 'use client';
 
-import { Flame, Droplets, Navigation, AlertTriangle } from 'lucide-react';
-import type { FirefightingState, FireHotspot } from '@/lib/firefighting';
+import {
+  Flame,
+  Droplets,
+  Navigation,
+  AlertTriangle,
+  CheckCircle2,
+} from 'lucide-react';
+import {
+  CEDAR_DIP_POND,
+  type FirefightingState,
+  type FireHotspot,
+} from '@/lib/firefighting';
 import type { Simulation } from '@/lib/simulation';
+import { riverX } from '@/lib/terrain-math';
 import { Progress } from '@/components/ui/progress';
 
 export function FirefightingHud({
@@ -20,37 +31,72 @@ export function FirefightingHud({
   if (!current) return null;
 
   const percent = Math.round(current.containedFraction * 100);
-  const activeHotspots = current.hotspots.filter((h: FireHotspot) => h.intensity > 0.05);
-  const tankPercent = Math.round((current.waterTank / current.waterCapacity) * 100);
+  const activeHotspots = current.hotspots.filter(
+    (h: FireHotspot) => h.intensity > 0.05,
+  );
+  const tankPercent = Math.round(
+    (current.waterTank / current.waterCapacity) * 100,
+  );
+  const altFeet = sim ? Math.round(sim.altitude * 3.28084) : 60;
+  const inDropEnvelope = sim ? sim.altitude < 36.0 && sim.altitude > 2.2 : true;
 
-  // Compute navigation guidance to the nearest burning hotspot
+  // Compute smart navigation guidance:
+  // - If tank is critically low (<= 20%), guide to nearest water scoop (Dip Basin or Cedar River)
+  // - Otherwise guide to the nearest active burning hotspot
   let navGuide: {
+    mode: 'fire' | 'scoop';
+    label: string;
     dist: number;
     text: string;
     arrow: string;
     isOverhead: boolean;
   } | null = null;
 
-  if (sim && activeHotspots.length > 0) {
-    let closestDist = Infinity;
-    let closestSpot = activeHotspots[0];
+  if (sim && percent < 95) {
+    const needsScoop = tankPercent <= 20 && !current.isScooping;
 
-    for (const spot of activeHotspots) {
-      const d = Math.hypot(spot.x - sim.x, spot.z - sim.z);
-      if (d < closestDist) {
-        closestDist = d;
-        closestSpot = spot;
+    let targetX: number = CEDAR_DIP_POND.x;
+    let targetZ: number = CEDAR_DIP_POND.z;
+    let targetRadius: number = CEDAR_DIP_POND.radius;
+    let targetLabel = 'CEDAR DIP BASIN';
+
+    if (needsScoop) {
+      const distPond = Math.hypot(
+        CEDAR_DIP_POND.x - sim.x,
+        CEDAR_DIP_POND.z - sim.z,
+      );
+      const rx = riverX(sim.z);
+      const distRiver = Math.abs(rx - sim.x);
+      if (distRiver < distPond) {
+        targetX = rx;
+        targetZ = sim.z;
+        targetRadius = 56;
+        targetLabel = 'CEDAR RIVER SCOOP';
       }
+    } else if (activeHotspots.length > 0) {
+      let closestDist = Infinity;
+      let closestSpot = activeHotspots[0];
+
+      for (const spot of activeHotspots) {
+        const d = Math.hypot(spot.x - sim.x, spot.z - sim.z);
+        if (d < closestDist) {
+          closestDist = d;
+          closestSpot = spot;
+        }
+      }
+      targetX = closestSpot.x;
+      targetZ = closestSpot.z;
+      targetRadius = closestSpot.radius;
+      targetLabel = (
+        closestSpot.name ?? `HOTSPOT #${closestSpot.id + 1}`
+      ).toUpperCase();
     }
 
-    const distM = Math.round(closestDist);
-    const isOverhead = distM <= (closestSpot.radius + 20);
+    const distM = Math.round(Math.hypot(targetX - sim.x, targetZ - sim.z));
+    const isOverhead = distM <= targetRadius + 24;
 
-    // Target bearing angle relative to plane heading
-    // dx = target.x - sim.x, dz = target.z - sim.z
-    // In our sim, heading 0 points North (-Z), sin(heading) is +X, -cos(heading) is +Z
-    const dx = closestSpot.x - sim.x;
-    const dz = closestSpot.z - sim.z;
+    const dx = targetX - sim.x;
+    const dz = targetZ - sim.z;
     const targetAngle = Math.atan2(dx, -dz);
     let headingDiff = targetAngle - (sim.heading ?? 0);
     while (headingDiff > Math.PI) headingDiff -= Math.PI * 2;
@@ -70,6 +116,8 @@ export function FirefightingHud({
     }
 
     navGuide = {
+      mode: needsScoop ? 'scoop' : 'fire',
+      label: targetLabel,
       dist: distM,
       text,
       arrow,
@@ -84,19 +132,21 @@ export function FirefightingHud({
         top: '12px',
         left: '50%',
         transform: 'translateX(-50%)',
-        background: 'rgba(18, 14, 12, 0.90)',
-        border: '1px solid rgba(249, 115, 22, 0.45)',
-        borderRadius: '12px',
-        padding: '10px 20px',
+        background:
+          'linear-gradient(180deg, rgba(22, 15, 13, 0.94) 0%, rgba(14, 11, 10, 0.92) 100%)',
+        border: '1px solid rgba(249, 115, 22, 0.52)',
+        borderRadius: '14px',
+        padding: '10px 18px',
         color: '#fff',
         display: 'flex',
         flexDirection: 'column',
-        gap: '8px',
+        gap: '7px',
         zIndex: 20,
-        minWidth: '340px',
+        minWidth: '370px',
         maxWidth: '92vw',
-        boxShadow: '0 8px 24px rgba(0, 0, 0, 0.5)',
-        backdropFilter: 'blur(8px)',
+        boxShadow:
+          '0 10px 28px rgba(0, 0, 0, 0.6), 0 0 24px rgba(234, 88, 12, 0.14)',
+        backdropFilter: 'blur(10px)',
       }}
     >
       <div
@@ -104,41 +154,147 @@ export function FirefightingHud({
           display: 'flex',
           justifyContent: 'space-between',
           alignItems: 'center',
-          fontWeight: 700,
-          fontSize: '13px',
-          letterSpacing: '0.05em',
+          fontWeight: 800,
+          fontSize: '12.5px',
+          letterSpacing: '0.06em',
           color: '#fb923c',
         }}
       >
         <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-          <Flame size={16} /> TIMBER WILDFIRE CONTAINMENT
+          <Flame size={15} color="#f97316" /> AIR TANKER · CEDAR VALLEY DISPATCH
         </span>
-        <span style={{ color: percent >= 95 ? '#4ade80' : '#fdba74' }}>
-          {percent}%
+        <span
+          style={{
+            color: percent >= 95 ? '#4ade80' : '#fed7aa',
+            fontVariantNumeric: 'tabular-nums',
+            fontSize: '13.5px',
+          }}
+        >
+          {percent}% CONTAINED
         </span>
       </div>
 
       <Progress
         value={percent}
         style={{
-          height: '8px',
-          background: 'rgba(255, 255, 255, 0.1)',
+          height: '7px',
+          background: 'rgba(255, 255, 255, 0.12)',
         }}
       />
+
+      {/* 6 Hotspot Tactical Telemetry Pips */}
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns: `repeat(${current.hotspots.length}, 1fr)`,
+          gap: '5px',
+          marginTop: '1px',
+        }}
+      >
+        {current.hotspots.map((spot) => {
+          const isOut = spot.intensity <= 0.06;
+          const pct = Math.round(spot.intensity * 100);
+          return (
+            <div
+              key={spot.id}
+              title={spot.name ?? `Hotspot #${spot.id + 1}`}
+              style={{
+                background: isOut
+                  ? 'rgba(16, 185, 129, 0.16)'
+                  : 'rgba(255, 255, 255, 0.05)',
+                border: isOut
+                  ? '1px solid rgba(16, 185, 129, 0.5)'
+                  : '1px solid rgba(251, 146, 60, 0.3)',
+                borderRadius: '5px',
+                padding: '3px 5px',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '3px',
+              }}
+            >
+              <div
+                style={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  fontSize: '9.5px',
+                  fontWeight: 700,
+                  color: isOut ? '#6ee7b7' : '#fdba74',
+                }}
+              >
+                <span>H{spot.id + 1}</span>
+                {isOut ? (
+                  <CheckCircle2 size={10} color="#34d399" />
+                ) : (
+                  <span>{pct}%</span>
+                )}
+              </div>
+              <div
+                style={{
+                  height: '3px',
+                  borderRadius: '2px',
+                  background: 'rgba(255,255,255,0.12)',
+                  overflow: 'hidden',
+                }}
+              >
+                <div
+                  style={{
+                    width: `${isOut ? 100 : pct}%`,
+                    height: '100%',
+                    background: isOut
+                      ? '#10b981'
+                      : spot.intensity > 0.55
+                        ? '#ef4444'
+                        : '#f59e0b',
+                    transition: 'width 0.2s ease',
+                  }}
+                />
+              </div>
+            </div>
+          );
+        })}
+      </div>
 
       <div
         style={{
           display: 'flex',
           justifyContent: 'space-between',
+          alignItems: 'center',
           fontSize: '11px',
-          color: '#d4d4d8',
+          color: '#e4e4e7',
+          fontVariantNumeric: 'tabular-nums',
         }}
       >
-        <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-          <Droplets size={13} color="#38bdf8" /> Retardant Tank: {tankPercent}%
+        <span style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+          <Droplets
+            size={13}
+            color={tankPercent <= 20 ? '#f87171' : '#fb7185'}
+          />
+          <span>
+            Phos-Chek Slurry:{' '}
+            <strong
+              style={{
+                color:
+                  tankPercent <= 20
+                    ? '#fca5a5'
+                    : tankPercent <= 45
+                      ? '#fde68a'
+                      : '#fecdd3',
+              }}
+            >
+              {tankPercent}%
+            </strong>
+          </span>
         </span>
-        <span>
-          Hotspots: {activeHotspots.length} / {current.hotspots.length}
+        <span
+          style={{
+            color: inDropEnvelope ? '#86efac' : '#fde68a',
+            fontWeight: 600,
+          }}
+        >
+          {inDropEnvelope
+            ? `DROP ALT OK (${altFeet} FT)`
+            : `DESCEND < 115 FT (${altFeet} FT)`}
         </span>
       </div>
 
@@ -146,12 +302,18 @@ export function FirefightingHud({
       {navGuide && percent < 95 && (
         <div
           style={{
-            background: navGuide.isOverhead
-              ? 'rgba(220, 38, 38, 0.35)'
-              : 'rgba(249, 115, 22, 0.18)',
-            border: navGuide.isOverhead
-              ? '1px solid #ef4444'
-              : '1px solid rgba(249, 115, 22, 0.5)',
+            background:
+              navGuide.mode === 'scoop'
+                ? 'rgba(14, 165, 233, 0.22)'
+                : navGuide.isOverhead
+                  ? 'rgba(225, 29, 72, 0.36)'
+                  : 'rgba(249, 115, 22, 0.18)',
+            border:
+              navGuide.mode === 'scoop'
+                ? '1px solid rgba(56, 189, 248, 0.65)'
+                : navGuide.isOverhead
+                  ? '1px solid #f43f5e'
+                  : '1px solid rgba(249, 115, 22, 0.5)',
             borderRadius: '6px',
             padding: '4px 10px',
             display: 'flex',
@@ -160,7 +322,12 @@ export function FirefightingHud({
             fontSize: '11px',
             fontWeight: 700,
             letterSpacing: '0.04em',
-            color: navGuide.isOverhead ? '#fca5a5' : '#fed7aa',
+            color:
+              navGuide.mode === 'scoop'
+                ? '#bae6fd'
+                : navGuide.isOverhead
+                  ? '#ffe4e6'
+                  : '#fed7aa',
           }}
         >
           <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
@@ -176,9 +343,13 @@ export function FirefightingHud({
                 transition: 'transform 0.2s ease',
               }}
             />
-            {navGuide.isOverhead
-              ? '🎯 DROP RETARDANT NOW [SPACE]'
-              : `FIRE LINE: ${navGuide.dist}m · ${navGuide.text}`}
+            {navGuide.mode === 'scoop'
+              ? navGuide.isOverhead
+                ? '💧 SKIM WATER < 26 FT AGL TO REFILL'
+                : `SCOOP: ${navGuide.label} (${navGuide.dist}m) · ${navGuide.text}`
+              : navGuide.isOverhead
+                ? '🎯 OVER TARGET · HOLD [SPACE] TO DROP SLURRY'
+                : `${navGuide.label}: ${navGuide.dist}m · ${navGuide.text}`}
           </span>
           <span style={{ fontSize: '13px' }}>{navGuide.arrow}</span>
         </div>
@@ -187,27 +358,28 @@ export function FirefightingHud({
       {current.isScooping && (
         <div
           style={{
-            background: 'rgba(14, 165, 233, 0.25)',
+            background: 'rgba(14, 165, 233, 0.28)',
             border: '1px solid #38bdf8',
             borderRadius: '6px',
-            padding: '3px 8px',
+            padding: '4px 8px',
             fontSize: '11px',
-            color: '#38bdf8',
+            color: '#7dd3fc',
             textAlign: 'center',
-            fontWeight: 600,
+            fontWeight: 700,
+            letterSpacing: '0.03em',
           }}
         >
-          💧 SCOOPING RIVER WATER · TANK REFILLING
+          💧 HYDRO-SCOOP ENGAGED · TANK REFILLING ({tankPercent}%)
         </div>
       )}
 
       {tankPercent === 0 && !current.isScooping && (
         <div
           style={{
-            background: 'rgba(239, 68, 68, 0.2)',
+            background: 'rgba(239, 68, 68, 0.22)',
             border: '1px solid #ef4444',
             borderRadius: '6px',
-            padding: '3px 8px',
+            padding: '4px 8px',
             fontSize: '11px',
             color: '#fca5a5',
             textAlign: 'center',
@@ -218,7 +390,8 @@ export function FirefightingHud({
             gap: '5px',
           }}
         >
-          <AlertTriangle size={13} /> RETARDANT EMPTY · Skim Cedar River &lt; 4.5m AGL to scoop
+          <AlertTriangle size={13} /> SLURRY DEPLETED · Skim Cedar Dip Basin
+          (East of ridge) or press [R]
         </div>
       )}
 
@@ -236,7 +409,7 @@ export function FirefightingHud({
             letterSpacing: '0.04em',
           }}
         >
-          ⚠️ ZERO VISIBILITY · DENSE SMOKE HAZARD
+          ⚠️ ZERO VISIBILITY · DENSE SMOKE PLUME
         </div>
       ) : current.smokeExposure > 0.15 ? (
         <div
@@ -251,7 +424,8 @@ export function FirefightingHud({
             fontWeight: 600,
           }}
         >
-          🌫️ SMOKE PLUME · VISIBILITY COMPROMISED ({Math.round(current.smokeExposure * 100)}%)
+          🌫️ SMOKE PLUME · VISIBILITY REDUCED (
+          {Math.round(current.smokeExposure * 100)}%)
         </div>
       ) : null}
 
@@ -268,7 +442,8 @@ export function FirefightingHud({
             fontWeight: 600,
           }}
         >
-          🔥 CONVECTIVE UPDRAFT +{current.thermalLift.toFixed(1)} m/s · HOLD CONTROLS
+          🔥 THERMAL UPDRAFT +{current.thermalLift.toFixed(1)} m/s · PITCH DOWN
+          OVER FLAMES
         </div>
       )}
 
@@ -278,14 +453,14 @@ export function FirefightingHud({
             background: 'rgba(34, 197, 94, 0.25)',
             border: '1px solid #22c55e',
             borderRadius: '6px',
-            padding: '3px 8px',
+            padding: '4px 8px',
             fontSize: '11px',
             color: '#86efac',
             textAlign: 'center',
             fontWeight: 700,
           }}
         >
-          ✅ FIRE CONTAINED! Press ENTER to complete contract
+          ✅ WILDFIRE CONTAINED! Press ENTER to claim dispatch payout
         </div>
       )}
     </div>
