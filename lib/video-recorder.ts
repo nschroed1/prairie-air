@@ -44,6 +44,7 @@ export function getSupportedVideoMimeType(): string {
 
 export class FlightVideoRecorder {
   private mediaRecorder: MediaRecorder | null = null;
+  private stream: MediaStream | null = null;
   private recordedChunks: Blob[] = [];
   private state: RecordingState = 'idle';
   private startTime = 0;
@@ -97,6 +98,7 @@ export class FlightVideoRecorder {
       }
 
       const combinedStream = new MediaStream(tracks);
+      this.stream = combinedStream;
       const mimeType = getSupportedVideoMimeType();
       this.currentMimeType = mimeType;
 
@@ -231,6 +233,8 @@ export class FlightVideoRecorder {
 
   private cleanup(): void {
     this.clearTimers();
+    this.stream?.getTracks().forEach((t) => t.stop());
+    this.stream = null;
     this.mediaRecorder = null;
     this.state = 'idle';
   }

@@ -197,8 +197,13 @@ export function createCumulusMaterial(sunDirUniform: { value: T.Vector3 }): T.Me
       `
       #include <begin_vertex>
       vCumulusY = position.y;
-      vWorldNormal = normalize((modelMatrix * vec4(normal, 0.0)).xyz);
-      vec4 worldPos = modelMatrix * vec4(position, 1.0);
+      #ifdef USE_INSTANCING
+        vWorldNormal = normalize((modelMatrix * instanceMatrix * vec4(normal, 0.0)).xyz);
+        vec4 worldPos = modelMatrix * instanceMatrix * vec4(position, 1.0);
+      #else
+        vWorldNormal = normalize((modelMatrix * vec4(normal, 0.0)).xyz);
+        vec4 worldPos = modelMatrix * vec4(position, 1.0);
+      #endif
       vViewVec = normalize(cameraPosition - worldPos.xyz);
       `,
     );
@@ -257,7 +262,12 @@ export function createStratusMaterial(): T.MeshStandardMaterial {
       '#include <begin_vertex>',
       `
       #include <begin_vertex>
-      vWorldStratus = (modelMatrix * vec4(position, 1.0)).xyz;
+      #ifdef USE_INSTANCING
+        vec4 worldPos = modelMatrix * instanceMatrix * vec4(position, 1.0);
+      #else
+        vec4 worldPos = modelMatrix * vec4(position, 1.0);
+      #endif
+      vWorldStratus = worldPos.xyz;
       `,
     );
 
@@ -344,7 +354,12 @@ export function createSquallMaterial(lightningUniform: { value: number }): T.Mes
       `
       #include <begin_vertex>
       vSquallY = position.y;
-      vSquallWorld = (modelMatrix * vec4(position, 1.0)).xyz;
+      #ifdef USE_INSTANCING
+        vec4 worldPos = modelMatrix * instanceMatrix * vec4(position, 1.0);
+      #else
+        vec4 worldPos = modelMatrix * vec4(position, 1.0);
+      #endif
+      vSquallWorld = worldPos.xyz;
       `,
     );
 
@@ -666,11 +681,9 @@ export class CloudSystem {
     _time: number,
     wind: { x: number; z: number },
     camera?: T.Camera,
-    sun?: T.DirectionalLight,
+    sun?: T.DirectionalLight | T.Vector3,
   ) {
-    // 1. Drift cumulus and stratus layers gently with wind
-    this.cumulusGroup.position.x += wind.x * dt * 0.5;
-    this.cumulusGroup.position.z += wind.z * dt * 0.5;
+    // 1. Drift stratus and cirrus layers relative to cloudGroup (cumulusGroup moves with cloudGroup)
     this.stratusGroup.position.x += wind.x * dt * 0.4;
     this.stratusGroup.position.z += wind.z * dt * 0.4;
 
@@ -680,7 +693,11 @@ export class CloudSystem {
 
     // 2. Update Sun direction for silver lining
     if (sun) {
-      this.sunDirUniform.value.copy(sun.position).normalize();
+      if ('isVector3' in sun && sun.isVector3) {
+        this.sunDirUniform.value.copy(sun).normalize();
+      } else if ('position' in sun) {
+        this.sunDirUniform.value.copy(sun.position).normalize();
+      }
     } else if (camera) {
       this.sunDirUniform.value.set(0.65, 0.6, -0.45).normalize();
     }

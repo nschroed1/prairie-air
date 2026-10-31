@@ -1,5 +1,11 @@
 import * as T from 'three';
 
+export interface WaterShaderUniforms {
+  waterTime: { value: number };
+  sunDirection: { value: T.Vector3 };
+  uNightFactor: { value: number };
+}
+
 /**
  * Creates a configured MeshStandardMaterial for the winding river featuring:
  * - Multi-frequency animated vertex displacement
@@ -10,10 +16,12 @@ import * as T from 'three';
  *
  * @param windTime - Animated time reference uniform { value: number }
  * @param sunDirection - Optional directional light vector for sun glints and reflections
+ * @param nightFactor - Optional night factor uniform [0, 1]
  */
 export function createRiverMaterial(
   windTime: { value: number },
   sunDirection?: T.Vector3,
+  nightFactor?: { value: number },
 ): T.MeshStandardMaterial {
   const material = new T.MeshStandardMaterial({
     color: '#1d70d8',
@@ -21,13 +29,21 @@ export function createRiverMaterial(
     roughness: 0.18,
   });
 
-  material.onBeforeCompile = (shader) => {
-    shader.uniforms.waterTime = windTime;
-    shader.uniforms.sunDirection = {
+  const waterUniforms: WaterShaderUniforms = {
+    waterTime: windTime,
+    sunDirection: {
       value: sunDirection
         ? sunDirection.clone().normalize()
         : new T.Vector3(-640, 620, -880).normalize(),
-    };
+    },
+    uNightFactor: nightFactor ?? { value: 0 },
+  };
+  material.userData.waterUniforms = waterUniforms;
+
+  material.onBeforeCompile = (shader) => {
+    shader.uniforms.waterTime = waterUniforms.waterTime;
+    shader.uniforms.sunDirection = waterUniforms.sunDirection;
+    shader.uniforms.uNightFactor = waterUniforms.uNightFactor;
 
     // Vertex Shader: declare varying outputs and uniform time
     shader.vertexShader =
@@ -56,6 +72,7 @@ vWater = position;
 varying vec2 vRiverUv;
 uniform float waterTime;
 uniform vec3 sunDirection;
+uniform float uNightFactor;
 ` + shader.fragmentShader;
 
     // Fragment Shader: color absorption/depth + downstream caustic ripples
@@ -74,7 +91,7 @@ uniform vec3 sunDirection;
       float ripple1 = sin(crossriver + downriver * 1.2) * cos(downriver * 1.8 - crossriver * 0.5);
       float ripple2 = cos(crossriver * 1.3 - downriver * 1.5) * sin(crossriver * 0.7 + downriver * 0.9);
       float caustics = (ripple1 + ripple2) * 0.5;
-      float causticHighlight = pow(max(0.0, caustics + 0.35), 2.8) * 0.28;
+      float causticHighlight = pow(max(0.0, caustics + 0.35), 2.8) * 0.28 * (1.0 - uNightFactor * 0.85);
       float riverFlow = sin(crossriver * 0.2 + downriver * 0.4) * 0.06;
 
       diffuseColor.rgb = depthColor * (0.94 + riverFlow) + vec3(0.38, 0.76, 0.98) * causticHighlight;`,
@@ -105,8 +122,11 @@ uniform vec3 sunDirection;
     // Fragment Shader: Fresnel sky reflection at glancing angles
     shader.fragmentShader = shader.fragmentShader.replace(
       '#include <opaque_fragment>',
-      `// Fresnel reflection factor: glancing angles reflect luminous sky gradient
-      vec3 skyReflection = mix(vec3(0.55, 0.74, 0.92), vec3(0.85, 0.92, 0.98), max(0.0, dot(geometryNormal, sunDirection)));
+      `// Fresnel reflection factor: glancing angles reflect luminous sky gradient by day, deep night sky at night
+      vec3 fresnelBase = mix(vec3(0.55, 0.74, 0.92), vec3(0.03, 0.06, 0.12), uNightFactor);
+      vec3 fresnelPeak = mix(vec3(0.85, 0.92, 0.98), vec3(0.06, 0.10, 0.18), uNightFactor);
+      vec3 skyReflection = mix(fresnelBase, fresnelPeak, max(0.0, dot(geometryNormal, sunDirection)));
+      fresnel *= mix(1.0, 0.28, uNightFactor);
       outgoingLight = mix(outgoingLight, skyReflection, fresnel * 0.65);
       #include <opaque_fragment>`,
     );

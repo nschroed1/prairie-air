@@ -30,6 +30,20 @@ export class CinematicCamera {
     this.camera.fov = this.baseFov;
     this.camera.updateProjectionMatrix();
 
+    if (options?.usePostProcessing !== false) {
+      this.ensureComposer();
+    }
+  }
+
+  setPostProcessing(enabled: boolean): void {
+    this.usePostProcessing = enabled;
+    if (enabled) {
+      this.ensureComposer();
+    }
+  }
+
+  private ensureComposer(): void {
+    if (this.composer) return;
     try {
       const width = this.renderer.domElement?.clientWidth || 1024;
       const height = this.renderer.domElement?.clientHeight || 768;
@@ -49,9 +63,9 @@ export class CinematicCamera {
       const renderPass = new RenderPass(this.scene, this.camera);
       composer.addPass(renderPass);
 
-      const bStrength = options?.bloomStrength ?? 0.22;
-      const bRadius = options?.bloomRadius ?? 0.35;
-      const bThreshold = options?.bloomThreshold ?? 0.86;
+      const bStrength = this.options?.bloomStrength ?? 0.22;
+      const bRadius = this.options?.bloomRadius ?? 0.35;
+      const bThreshold = this.options?.bloomThreshold ?? 0.86;
       const bloomPass = new UnrealBloomPass(resolution, bStrength, bRadius, bThreshold);
       composer.addPass(bloomPass);
 
@@ -102,6 +116,9 @@ export class CinematicCamera {
 
     // Direct WebGL rendering provides native hardware MSAA and ACESFilmic tone mapping
     // without the periodic ANGLE/Metal resolve drops or bloom flickering of EffectComposer.
+    if (this.usePostProcessing && this.enabled) {
+      this.ensureComposer();
+    }
     if (this.usePostProcessing && this.enabled && this.composer) {
       try {
         this.composer.render();

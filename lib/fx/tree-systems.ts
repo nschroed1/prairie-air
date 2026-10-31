@@ -486,13 +486,19 @@ export function createFullTreeGeometry(species: TreeType): T.BufferGeometry {
  */
 export function createTreeCrownMaterial(
   windTime: { value: number },
-  sunDir?: T.Vector3,
+  sunDir?: T.Vector3 | { value: T.Vector3 },
   options?: T.MeshStandardMaterialParameters,
+  nightFactorUniform?: { value: number },
 ): T.MeshStandardMaterial {
-  const sunDirection = sunDir
-    ? sunDir.clone().normalize()
-    : new T.Vector3(0.5, 0.8, 0.3).normalize();
-  const sunUniform = { value: sunDirection };
+  const sunUniform: { value: T.Vector3 } =
+    sunDir && 'value' in sunDir
+      ? sunDir
+      : {
+          value: sunDir
+            ? sunDir.clone()
+            : new T.Vector3(60, 120, 40),
+        };
+  const nightUniform = nightFactorUniform ?? { value: 0 };
 
   const material = new T.MeshStandardMaterial({
     color: 0xffffff,
@@ -501,10 +507,13 @@ export function createTreeCrownMaterial(
     side: T.DoubleSide,
     ...options,
   });
+  material.userData.sunUniform = sunUniform;
+  material.userData.nightFactorUniform = nightUniform;
 
   material.onBeforeCompile = (shader) => {
     shader.uniforms.windTime = windTime;
     shader.uniforms.sunDirection = sunUniform;
+    shader.uniforms.uNightFactor = nightUniform;
 
     // Inject varyings and uniforms into vertex shader
     shader.vertexShader =
@@ -552,6 +561,7 @@ export function createTreeCrownMaterial(
       'varying float vTreeHeight;\n' +
       'uniform float windTime;\n' +
       'uniform vec3 sunDirection;\n' +
+      'uniform float uNightFactor;\n' +
       shader.fragmentShader;
 
     // Inject crown volume AO and subsurface scattering into fragment shader
@@ -568,14 +578,15 @@ export function createTreeCrownMaterial(
       // Sunlit upper crown illumination
       vec3 sunDirNorm = normalize(sunDirection);
       float sunFacing = max(0.0, dot(norm, sunDirNorm));
-      diffuseColor.rgb += diffuseColor.rgb * vec3(0.18, 0.22, 0.08) * sunFacing * 0.35;
+      float daylightTransmittance = clamp(sunDirection.y / 60.0, 0.05, 1.0) * (1.0 - uNightFactor * 0.95);
+      diffuseColor.rgb += diffuseColor.rgb * vec3(0.18, 0.22, 0.08) * sunFacing * 0.35 * daylightTransmittance;
 
       // Subsurface light scattering / leaf translucency:
       // When back-lit by the sun, crowns glow with warm leaf transmittance
       vec3 viewDir = normalize(cameraPosition - vWorldPosition);
       float sssFactor = pow(max(0.0, dot(viewDir, -sunDirNorm)), 3.0);
       float canopyTransmittance = sssFactor * (0.35 + 0.65 * max(0.0, norm.y));
-      vec3 warmLeafTransmittance = vec3(0.85, 0.92, 0.30) * canopyTransmittance * 0.45;
+      vec3 warmLeafTransmittance = vec3(0.85, 0.92, 0.30) * canopyTransmittance * 0.45 * daylightTransmittance;
       diffuseColor.rgb += warmLeafTransmittance * diffuseColor.rgb * 1.8;`,
     );
   };
@@ -691,6 +702,8 @@ export class TreeSystem {
   totalTrees = 0;
   windTime: { value: number };
   sunDir?: T.Vector3;
+  sunUniform: { value: T.Vector3 };
+  nightFactorUniform: { value: number };
 
   private scene?: T.Scene;
   private disposed = false;
@@ -713,10 +726,19 @@ export class TreeSystem {
 
     this.windTime = opts.windTime ?? { value: 0 };
     this.sunDir = opts.sunDir;
+    this.sunUniform = {
+      value: opts.sunDir ? opts.sunDir.clone() : new T.Vector3(60, 120, 40),
+    };
+    this.nightFactorUniform = { value: 0 };
 
     // Materials
     this.trunkMaterial = createTreeTrunkMaterial();
-    this.crownMaterial = createTreeCrownMaterial(this.windTime, this.sunDir);
+    this.crownMaterial = createTreeCrownMaterial(
+      this.windTime,
+      this.sunUniform,
+      undefined,
+      this.nightFactorUniform,
+    );
     this.crownMaterials.push(this.crownMaterial);
 
     const count = opts.count ?? 2000;
@@ -943,11 +965,17 @@ export class TreeSystem {
   }
 
   /**
-   * Updates wind animation and time uniform for canopy sway.
+   * Updates wind animation, sun direction, and night factor uniforms for canopy sway and lighting.
    */
-  update(_dt: number, time: number): void {
+  update(_dt: number, time: number, sunDir?: T.Vector3, nightFactor?: number): void {
     if (this.disposed) return;
     this.windTime.value = time;
+    if (sunDir) {
+      this.sunUniform.value.copy(sunDir);
+    }
+    if (nightFactor !== undefined) {
+      this.nightFactorUniform.value = nightFactor;
+    }
   }
 
   /**

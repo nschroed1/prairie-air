@@ -120,8 +120,15 @@ export class SupabaseCountyStore implements CountyStore {
         expected_claim: expectedClaim,
         finished,
         coverage: sim.coverage,
-        lease_until: now + LEASE_MS,
-        renew: sim.coverage > (claim?.coverage ?? 0),
+        lease_until:
+          sim.coverage > (claim?.coverage ?? 0)
+            ? now + LEASE_MS
+            : command.action === 'refill'
+              ? Math.max(claim?.lease_until ?? 0, now + 60000)
+              : now + LEASE_MS,
+        renew:
+          sim.coverage > (claim?.coverage ?? 0) ||
+          command.action === 'refill',
         payout:
           finished === null
             ? null

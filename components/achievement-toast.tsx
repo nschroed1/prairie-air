@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   Trophy,
   Sparkles,
@@ -114,11 +114,15 @@ export function AchievementToastContainer({
   onSoundCue?: (cue: 'bonus' | 'cash-register' | 'barnstormer') => void;
 }) {
   const [toasts, setToasts] = useState<ToastItem[]>([]);
+  const onSoundCueRef = useRef(onSoundCue);
+  onSoundCueRef.current = onSoundCue;
 
   useEffect(() => {
+    const timers: ReturnType<typeof setTimeout>[] = [];
+
     const unsubUnlock = achievementManager.onUnlock((def: AchievementDef, bonus: number) => {
-      if (onSoundCue) {
-        onSoundCue(bonus >= 500 ? 'barnstormer' : 'bonus');
+      if (onSoundCueRef.current) {
+        onSoundCueRef.current(bonus >= 500 ? 'barnstormer' : 'bonus');
       }
       const newToast: ToastItem = {
         id: `ach-${def.id}-${Date.now()}`,
@@ -130,14 +134,15 @@ export function AchievementToastContainer({
       };
       setToasts((prev) => [...prev, newToast]);
 
-      setTimeout(() => {
+      const tId = setTimeout(() => {
         setToasts((prev) => prev.filter((t) => t.id !== newToast.id));
       }, 4500);
+      timers.push(tId);
     });
 
     const unsubHof = achievementManager.onRecord((rec: HallOfFameRecord, isNewAllTime: boolean) => {
       if (isNewAllTime) {
-        if (onSoundCue) onSoundCue('barnstormer');
+        if (onSoundCueRef.current) onSoundCueRef.current('barnstormer');
         const newToast: ToastItem = {
           id: `hof-${rec.id}-${Date.now()}`,
           type: 'hof',
@@ -148,17 +153,19 @@ export function AchievementToastContainer({
         };
         setToasts((prev) => [...prev, newToast]);
 
-        setTimeout(() => {
+        const tId = setTimeout(() => {
           setToasts((prev) => prev.filter((t) => t.id !== newToast.id));
         }, 5000);
+        timers.push(tId);
       }
     });
 
     return () => {
       unsubUnlock();
       unsubHof();
+      for (const tId of timers) clearTimeout(tId);
     };
-  }, [onSoundCue]);
+  }, []);
 
   if (!toasts.length) return null;
 

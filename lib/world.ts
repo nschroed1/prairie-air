@@ -7,7 +7,7 @@ import { skyAudienceView } from './skywriting';
 import * as T from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import type { CountySnapshot, PublicPilot } from './county';
-import { createRiverMaterial } from './fx/water-shader';
+import { createRiverMaterial, type WaterShaderUniforms } from './fx/water-shader';
 import { applyCropWindAndShadows } from './fx/crop-wind-shader';
 import { AircraftFX } from './fx/aircraft-fx';
 import { ArcadeFX } from './fx/arcade-fx';
@@ -230,6 +230,43 @@ export class World {
   landingLight: T.SpotLight | null = null;
   landingBulbMat: T.MeshBasicMaterial | null = null;
   aircraftNavLights: { port: T.PointLight; stbd: T.PointLight } | null = null;
+  waterUniforms: WaterShaderUniforms | null = null;
+  aiPilotGroup = new T.Group();
+  private sunDirection = new T.Vector3(60, 120, 40).copy(SUN_OFFSET);
+  private _scratchColor1 = new T.Color();
+  private _scratchColor2 = new T.Color();
+  private _camOffset = new T.Vector3();
+  private _camLook = new T.Vector3();
+  private _camDesired = new T.Vector3();
+  private _camFrom = new T.Vector3();
+  private _camDelta = new T.Vector3();
+  private _camPoint = new T.Vector3();
+  private _moonOffset = new T.Vector3(-540, 860, -620);
+  private _celestialOffset = new T.Vector3();
+  private _localPosScratch = new T.Vector3();
+  private _emitPosScratch = new T.Vector3();
+  private aiPilotEntry: {
+    mesh: T.Group;
+    labelSprite?: T.Sprite;
+    labelCanvas?: HTMLCanvasElement;
+    lastLabelKey?: string;
+    lastDistanceUpdate?: number;
+    sprayPoints: T.Points;
+    sprayPositions: Float32Array;
+    sprayLife: Float32Array;
+    sprayIndex: number;
+    state: {
+      x: number;
+      y: number;
+      z: number;
+      heading: number;
+      roll: number;
+      speed?: number;
+      spraying: boolean;
+      callsign?: string;
+      accentColor?: string;
+    } | null;
+  } | null = null;
   private skyRevealWasActive = false;
   constructor(
     public host: HTMLElement,
@@ -300,6 +337,7 @@ export class World {
     this.attachAircraftNightLighting();
     this.scene.add(
       this.plane,
+      this.aiPilotGroup,
       this.marker,
       this.guideBorder,
       this.guideLine,
@@ -345,6 +383,9 @@ export class World {
         opacity: 0.3,
         depthWrite: false,
         side: T.DoubleSide,
+        polygonOffset: true,
+        polygonOffsetFactor: -1,
+        polygonOffsetUnits: -1,
       }),
     );
     this.coverageMesh.geometry.setDrawRange(0, 0);
@@ -374,7 +415,7 @@ export class World {
     const rivalCoverageGeometry = new T.BufferGeometry();
     rivalCoverageGeometry.setAttribute(
       'position',
-      new T.BufferAttribute(new Float32Array(1444 * 6 * 3), 3).setUsage(
+      new T.BufferAttribute(new Float32Array(1444 * 18 * 3), 3).setUsage(
         T.DynamicDrawUsage,
       ),
     );
@@ -386,6 +427,9 @@ export class World {
         opacity: 0.35,
         depthWrite: false,
         side: T.DoubleSide,
+        polygonOffset: true,
+        polygonOffsetFactor: -1,
+        polygonOffsetUnits: -1,
       }),
     );
     this.rivalCoverageMesh.geometry.setDrawRange(0, 0);
@@ -459,7 +503,12 @@ export class World {
       this.renderer,
       this.scene,
       this.camera,
-      { bloomStrength: 0.10, bloomRadius: 0.35, bloomThreshold: 1.35 },
+      {
+        bloomStrength: 0.10,
+        bloomRadius: 0.35,
+        bloomThreshold: 1.35,
+        usePostProcessing: false,
+      },
     );
     this.stuntGroup.name = 'Stunt World Props';
     this.scene.add(this.stuntGroup);
@@ -830,7 +879,13 @@ export class World {
     };
     ribbon(125, 0.6, mat('#6b8b48'));
     ribbon(67, 0.87, mat('#ada477'));
-    const water = createRiverMaterial(this.windTime, this.sun.position);
+    const water = createRiverMaterial(
+      this.windTime,
+      this.sunDirection,
+      this.nightSkyUniform,
+    );
+    this.waterUniforms =
+      (water.userData.waterUniforms as WaterShaderUniforms) ?? null;
     ribbon(58, 1.17, water);
     this.createTrees();
     this.createCropDetail();
@@ -838,7 +893,7 @@ export class World {
   createTrees() {
     this.treeSystem = new TreeSystem(this.scene, {
       windTime: this.windTime,
-      sunDir: this.sun.position,
+      sunDir: this.sunDirection,
       count: 2000,
     });
     for (const crownMat of this.treeSystem.crownMaterials) {
@@ -1357,6 +1412,7 @@ export class World {
     this.landingLight = new T.SpotLight('#fff4d6', 0, 85, Math.PI / 6, 0.5, 1.4);
     this.landingLight.position.set(0, -0.5, -4.2);
     const landingTarget = new T.Object3D();
+    landingTarget.name = 'landingLightTarget';
     landingTarget.position.set(0, -6.0, -32);
     this.plane.add(landingTarget);
     this.landingLight.target = landingTarget;
@@ -1372,6 +1428,19 @@ export class World {
       bulb.position.set(sx, -0.4, -4.5);
       this.plane.add(bulb);
     }
+  }
+  private cloneAircraftWithoutLights(): T.Group {
+    const clone = this.plane.clone(true);
+    const toRemove: T.Object3D[] = [];
+    clone.traverse((child) => {
+      if ((child as T.Light).isLight || child.name === 'landingLightTarget') {
+        toRemove.push(child);
+      }
+    });
+    for (const obj of toRemove) {
+      obj.parent?.remove(obj);
+    }
+    return clone;
   }
   updateMarker() {
     this.marker.visible =
@@ -1410,7 +1479,7 @@ export class World {
       for (let j = 0; j < steps; j++) {
         const px = x + a.x + ((b.x - a.x) * j) / steps,
           pz = z + a.z + ((b.z - a.z) * j) / steps;
-        points.push(new T.Vector3(px, ground(px, pz) + 2, pz));
+        points.push(new T.Vector3(px, ground(px, pz) + 0.65, pz));
       }
     }
     points.push(points[0].clone());
@@ -1429,7 +1498,7 @@ export class World {
       ];
       for (const corner of [0, 1, 2, 0, 2, 3]) {
         const [px, pz] = corners[corner];
-        boundaryPositions.push(px, ground(px, pz) + 2.8, pz);
+        boundaryPositions.push(px, ground(px, pz) + 0.65, pz);
       }
     }
     const boundary = new T.BufferGeometry();
@@ -1470,7 +1539,7 @@ export class World {
       const vertices: number[] = [];
       for (let i = 1; i < polygon.length - 1; i++)
         for (const p of [polygon[0], polygon[i + 1], polygon[i]])
-          vertices.push(x + p.x, ground(x + p.x, z + p.z) + 2.65, z + p.z);
+          vertices.push(x + p.x, ground(x + p.x, z + p.z) + 0.45, z + p.z);
       this.coverageTiles.set(n, vertices);
 
       const lineVerts: number[] = [];
@@ -1480,10 +1549,10 @@ export class World {
         const p2 = polygon[(j + 1) % len];
         lineVerts.push(
           x + p1.x,
-          ground(x + p1.x, z + p1.z) + 2.7,
+          ground(x + p1.x, z + p1.z) + 0.5,
           z + p1.z,
           x + p2.x,
-          ground(x + p2.x, z + p2.z) + 2.7,
+          ground(x + p2.x, z + p2.z) + 0.5,
           z + p2.z,
         );
       }
@@ -1648,7 +1717,7 @@ export class World {
           ];
           for (const corner of [0, 1, 2, 0, 2, 3]) {
             const [x, z] = corners[corner];
-            line.setXYZ(vertex++, x, ground(x, z) + 3.3, z);
+            line.setXYZ(vertex++, x, ground(x, z) + 0.95, z);
           }
         }
       }
@@ -1658,7 +1727,7 @@ export class World {
     const points = sprayFootprint(this.sim);
     const outline = this.footprintLine.geometry.attributes.position;
     [...points, points[0]].forEach((p, i) =>
-      outline.setXYZ(i, p.x, ground(p.x, p.z) + 3, p.z),
+      outline.setXYZ(i, p.x, ground(p.x, p.z) + 0.75, p.z),
     );
     outline.needsUpdate = true;
     const fill = this.footprintFill.geometry.attributes.position;
@@ -1666,7 +1735,7 @@ export class World {
       fill.setXYZ(
         i,
         points[n].x,
-        ground(points[n].x, points[n].z) + 2.9,
+        ground(points[n].x, points[n].z) + 0.75,
         points[n].z,
       ),
     );
@@ -1855,21 +1924,38 @@ export class World {
     this.nightFactor += (targetNight - this.nightFactor) * nightBlend;
     this.nightSkyUniform.value = this.nightFactor;
 
+    this._celestialOffset.copy(SUN_OFFSET).lerp(this._moonOffset, this.nightFactor);
+    this.sunDirection.copy(this._celestialOffset);
+    if (this.waterUniforms) {
+      this.waterUniforms.sunDirection.value.copy(this.sunDirection).normalize();
+      this.waterUniforms.uNightFactor.value = this.nightFactor;
+    }
+    if (this.treeSystem) {
+      this.treeSystem.sunUniform.value.copy(this.sunDirection);
+      this.treeSystem.nightFactorUniform.value = this.nightFactor;
+    }
+
     const targetSunIntensity = this.nightFactor > 0.3
       ? 0.42 * (1 - forecast.cloud * 0.4)
       : forecast.sunlight * (1 - this.nightFactor * 0.88);
     this.sun.intensity += (targetSunIntensity - this.sun.intensity) * blend;
 
     const daySunColor = forecast.cloud > 0.7 ? '#dce8ee' : '#ffe3a8';
-    const targetSunColor = new T.Color(daySunColor).lerp(new T.Color('#94b8e6'), this.nightFactor);
+    const targetSunColor = this._scratchColor1
+      .set(daySunColor)
+      .lerp(this._scratchColor2.set('#94b8e6'), this.nightFactor);
     this.sun.color.lerp(targetSunColor, blend);
 
     if (this.hemiLight) {
       const targetHemiIntensity = 1.25 - this.nightFactor * 1.05;
       this.hemiLight.intensity += (targetHemiIntensity - this.hemiLight.intensity) * blend;
-      const targetSky = new T.Color('#b9dbff').lerp(new T.Color(NIGHT_HEMI_SKY), this.nightFactor);
-      const targetGround = new T.Color('#47572b').lerp(new T.Color(NIGHT_HEMI_GROUND), this.nightFactor);
+      const targetSky = this._scratchColor1
+        .set('#b9dbff')
+        .lerp(this._scratchColor2.set(NIGHT_HEMI_SKY), this.nightFactor);
       this.hemiLight.color.lerp(targetSky, blend);
+      const targetGround = this._scratchColor1
+        .set('#47572b')
+        .lerp(this._scratchColor2.set(NIGHT_HEMI_GROUND), this.nightFactor);
       this.hemiLight.groundColor.lerp(targetGround, blend);
     }
 
@@ -1883,7 +1969,10 @@ export class World {
           ? '#abbfc5'
           : '#bdd6e0',
     );
-    const targetFogColor = dayFogColor.lerp(new T.Color(NIGHT_FOG_COLOR), this.nightFactor);
+    const targetFogColor = dayFogColor.lerp(
+      this._scratchColor1.set(NIGHT_FOG_COLOR),
+      this.nightFactor,
+    );
     fog.color.lerp(targetFogColor, blend);
 
     // Wildfire Smoke Atmospheric Attenuation:
@@ -1893,7 +1982,9 @@ export class World {
       if (smokeExp > 0.01) {
         const smokeTargetDensity = Math.max(targetFogDensity, 0.00012 + smokeExp * 0.0062);
         fog.density += (smokeTargetDensity - fog.density) * Math.min(1, blend * 3.8);
-        const smokeHaze = new T.Color('#382d22').lerp(new T.Color('#221c17'), smokeExp);
+        const smokeHaze = this._scratchColor1
+          .set('#382d22')
+          .lerp(this._scratchColor2.set('#221c17'), smokeExp);
         fog.color.lerp(smokeHaze, Math.min(1, smokeExp * 0.85));
         if (this.sun) {
           this.sun.intensity *= (1 - smokeExp * 0.6);
@@ -1902,7 +1993,9 @@ export class World {
     }
     this.cloudSystem?.updateWeather(forecast, dt, this.time);
     this.cloudMaterial?.color.lerp(
-      this.weatherColor.set(forecast.cloud > 0.7 ? '#a6b5bb' : '#f5f1df').lerp(new T.Color('#1e2838'), this.nightFactor * 0.85),
+      this.weatherColor
+        .set(forecast.cloud > 0.7 ? '#a6b5bb' : '#f5f1df')
+        .lerp(this._scratchColor1.set('#1e2838'), this.nightFactor * 0.85),
       blend,
     );
     this.scene.environmentIntensity = (0.38 - this.weatherCover.value * 0.16) * (1 - this.nightFactor * 0.94) + 0.02;
@@ -1938,7 +2031,7 @@ export class World {
     this.sim.step(dt, this.input);
     this.updatePlane();
     this.updateCropDetail();
-    this.treeSystem?.update(dt, this.time);
+    this.treeSystem?.update(dt, this.time, this.sunDirection, this.nightFactor);
     this.ruralLife.update(this.time, this.sim.x, this.sim.z, this.sim.altitude);
     this.farmsteadLights?.update(dt, this.time, this.nightFactor);
     this.roadTraffic?.update(dt, this.sim.x, this.sim.z, this.nightFactor);
@@ -1948,8 +2041,9 @@ export class World {
       const wind = this.sim.windVector;
       const speed = Math.hypot(wind.x, wind.z);
       if (speed > 0.05) {
-        this.windsockCone.rotation.y = Math.atan2(wind.x, wind.z) + Math.PI;
-        this.windsockCone.rotation.x = Math.min(0.65, Math.max(0.08, speed * 0.12));
+        this.windsockCone.rotation.y =
+          Math.atan2(wind.x, wind.z) + Math.PI - farmRotation(0);
+        this.windsockCone.rotation.x = Math.max(-0.15, 0.25 - speed * 0.025);
       }
     }
     this.updateMarker();
@@ -1958,55 +2052,64 @@ export class World {
     this.updateCollectibles(dt);
     this.prop.rotation.z += dt * 70;
     const preview = this.sim.phase === 'ready';
-    let offset: T.Vector3;
-    let look: T.Vector3;
+    const offset = this._camOffset;
+    const look = this._camLook;
     let smoothing = preview ? 0.7 : 3.0;
 
     if (this.cameraMode === 1) {
       // Cockpit / Nose View
-      offset = new T.Vector3(0, 3.4, 1);
-      offset.applyAxisAngle(Y, -this.sim.heading);
-      look = new T.Vector3(
-        Math.sin(this.sim.heading) * 60,
-        2,
-        -Math.cos(this.sim.heading) * 60,
-      ).add(this.plane.position);
+      offset.set(0, 3.4, 1).applyAxisAngle(Y, -this.sim.heading);
+      const cosPitch = Math.cos(this.sim.pitch);
+      const fwdDist = 60 * cosPitch;
+      look
+        .set(
+          Math.sin(this.sim.heading) * fwdDist,
+          2 + Math.sin(this.sim.pitch) * 38,
+          -Math.cos(this.sim.heading) * fwdDist,
+        )
+        .add(this.plane.position);
       smoothing = 14.0;
     } else if (this.cameraMode === 2) {
       // Wingtip / Spray Boom Action Cam
-      offset = new T.Vector3(-9.6, 0.75, -0.6);
-      offset.applyAxisAngle(Y, -this.sim.heading);
-      look = new T.Vector3(
-        Math.sin(this.sim.heading) * 45 + Math.cos(this.sim.heading) * 8,
-        -2,
-        -Math.cos(this.sim.heading) * 45 + Math.sin(this.sim.heading) * 8,
-      ).add(this.plane.position);
+      offset.set(-9.6, 0.75, -0.6).applyAxisAngle(Y, -this.sim.heading);
+      look
+        .set(
+          Math.sin(this.sim.heading) * 45 + Math.cos(this.sim.heading) * 8,
+          -2,
+          -Math.cos(this.sim.heading) * 45 + Math.sin(this.sim.heading) * 8,
+        )
+        .add(this.plane.position);
       smoothing = 6.0;
     } else if (this.cameraMode === 3) {
       // Flyby Spectator Cam
       const orbitAngle = this.sim.heading + 0.45;
-      offset = new T.Vector3(
+      offset.set(
         Math.sin(orbitAngle) * 58,
         14,
         -Math.cos(orbitAngle) * 58,
       );
-      look = this.plane.position.clone().add(new T.Vector3(0, 1.5, 0));
+      look.copy(this.plane.position);
+      look.y += 1.5;
       smoothing = 1.4;
     } else {
       // Mode 0: Chase Cam
-      offset = preview
-        ? new T.Vector3(24 + Math.sin(this.time * 0.07) * 5, 12, 33)
-        : new T.Vector3(0, 8.5, 30);
+      if (preview) {
+        offset.set(24 + Math.sin(this.time * 0.07) * 5, 12, 33);
+      } else {
+        offset.set(0, 8.5, 30);
+      }
       offset.applyAxisAngle(Y, -this.sim.heading);
-      look = new T.Vector3(
-        Math.sin(this.sim.heading) * 50,
-        -5,
-        -Math.cos(this.sim.heading) * 50,
-      ).add(this.plane.position);
+      look
+        .set(
+          Math.sin(this.sim.heading) * 50,
+          -5,
+          -Math.cos(this.sim.heading) * 50,
+        )
+        .add(this.plane.position);
       smoothing = preview ? 0.7 : 3.0;
     }
 
-    const desired = this.plane.position.clone().add(offset);
+    const desired = this._camDesired.copy(this.plane.position).add(offset);
     const teleported =
       this.skyRevealWasActive ||
       this.lastCameraPlane.distanceTo(this.plane.position) > 80;
@@ -2015,10 +2118,12 @@ export class World {
     this.lastCameraPlane.copy(this.plane.position);
     // Bring the chase camera forward when scenery lies between it and the plane.
     if (this.cameraMode === 0 && !preview) {
-      const from = this.plane.position.clone().add(new T.Vector3(0, 2, 0));
-      const delta = this.camera.position.clone().sub(from);
+      const from = this._camFrom.copy(this.plane.position);
+      from.y += 2;
+      const delta = this._camDelta.copy(this.camera.position).sub(from);
+      const point = this._camPoint;
       for (let t = 0.1; t <= 1; t += 0.05) {
-        const point = from.clone().addScaledVector(delta, t);
+        point.copy(from).addScaledVector(delta, t);
         const blocked = this.sim.stunts.obstacles.some(
           (o) =>
             this.sim.stunts.calculateClearance(point.x, point.y, point.z, o) <
@@ -2032,8 +2137,12 @@ export class World {
         }
       }
     }
-    if (preview)
-      look.copy(this.plane.position).add(new T.Vector3(-70, -12, -80));
+    if (preview) {
+      look.copy(this.plane.position);
+      look.x -= 70;
+      look.y -= 12;
+      look.z -= 80;
+    }
     this.camera.up.set(0, 1, 0);
     this.camera.lookAt(look);
     const skyReveal = this.sim.isSkywriting && this.sim.phase === 'complete';
@@ -2098,15 +2207,17 @@ export class World {
       this.aircraftNavLights.stbd.intensity = this.nightFactor * 0.8;
     }
     this.plane.visible = this.cameraMode !== 1;
-    const moonOffset = new T.Vector3(-540, 860, -620);
-    const celestialOffset = SUN_OFFSET.clone().lerp(moonOffset, this.nightFactor);
-    this.sun.position.copy(this.plane.position).add(celestialOffset);
+    this.sun.position.copy(this.plane.position).add(this.sunDirection);
     this.sun.target.position.copy(this.plane.position);
     const cloudWind = windVector(this.flightWeather, this.time);
     this.cloudGroup.position.x += cloudWind.x * dt * 0.5;
     this.cloudGroup.position.z += cloudWind.z * dt * 0.5;
+    if (this.cloudGroup.position.x > 3500) this.cloudGroup.position.x -= 7000;
+    else if (this.cloudGroup.position.x < -3500) this.cloudGroup.position.x += 7000;
+    if (this.cloudGroup.position.z > 3500) this.cloudGroup.position.z -= 7000;
+    else if (this.cloudGroup.position.z < -3500) this.cloudGroup.position.z += 7000;
     this.windVectorUniform.value.set(cloudWind.x, cloudWind.z);
-    this.cloudSystem?.update(dt, this.time, cloudWind, this.camera, this.sun);
+    this.cloudSystem?.update(dt, this.time, cloudWind, this.camera, this.sunDirection);
     this.plane.updateMatrixWorld();
     this.updateParticles(dt);
     this.aircraftFx?.update(dt, this.sim, this.time);
@@ -2148,7 +2259,7 @@ export class World {
           this.time,
           this.weatherCover.value,
           this.sim.y,
-          this.sun.position,
+          this.sunDirection,
         );
       }
     }
@@ -2161,7 +2272,7 @@ export class World {
       ) ?? [];
     for (const ev of skyEvents) {
       if (ev.type === 'balloon_flyby') {
-        this.sim.career.cash += ev.bonus;
+        this.sim.awardReward(ev.message, 75);
         this.sim.message = ev.message;
         this.arcadeFx?.addFloatingBadge(ev.message, '#f59e0b', ev.pos);
       }
@@ -2208,7 +2319,7 @@ export class World {
           remote.lastNearMissTime = nowSec;
           const bonus = isRival ? 150 : 75;
           const label = isRival ? '★ RIVAL BUZZ! +$150' : '★ FORMATION BUZZ! +$75';
-          this.sim.career.cash += bonus;
+          this.sim.awardReward(label, bonus);
           this.sim.message = label;
           this.arcadeFx?.addFloatingBadge(
             label,
@@ -2245,7 +2356,9 @@ export class World {
         nearestRemoteRelSpeed = -(dvx * losX + dvy * losY + dvz * losZ);
 
         // 3D cockpit-relative stereo panning (works in pitch, roll, and inverted flight)
-        const localPos = this.plane.worldToLocal(remote.mesh.position.clone());
+        const localPos = this.plane.worldToLocal(
+          this._localPosScratch.copy(remote.mesh.position),
+        );
         nearestRemotePan = Math.max(-0.9, Math.min(0.9, localPos.x / 35));
       }
 
@@ -2292,9 +2405,9 @@ export class World {
           const idx = (remote.sprayIndex ?? 0) % count;
           remote.sprayIndex = idx + 1;
           const spread = (Math.random() - 0.5) * 14;
-          const emitPos = new T.Vector3(spread, -0.8, 1.2).applyMatrix4(
-            remote.mesh.matrixWorld,
-          );
+          const emitPos = this._emitPosScratch
+            .set(spread, -0.8, 1.2)
+            .applyMatrix4(remote.mesh.matrixWorld);
           remote.sprayPositions[idx * 3] = emitPos.x;
           remote.sprayPositions[idx * 3 + 1] = emitPos.y;
           remote.sprayPositions[idx * 3 + 2] = emitPos.z;
@@ -2315,6 +2428,102 @@ export class World {
         }
         if (hasActiveParticles || emitCount > 0) {
           remote.sprayPoints.geometry.attributes.position.needsUpdate = true;
+        }
+      }
+    }
+
+    if (this.aiPilotEntry) {
+      const ai = this.aiPilotEntry.state;
+      const isSolo =
+        (this.sim as { matchMode?: string }).matchMode === 'solo';
+      if (!ai || isSolo) {
+        this.aiPilotEntry.mesh.visible = false;
+        this.aiPilotEntry.sprayPoints.visible = false;
+      } else {
+        this.aiPilotEntry.mesh.visible = true;
+        this.aiPilotEntry.sprayPoints.visible = true;
+        this.aiPilotEntry.mesh.position.set(ai.x, ai.y, ai.z);
+        this.aiPilotEntry.mesh.rotation.order = 'YXZ';
+        this.aiPilotEntry.mesh.rotation.set(0, -ai.heading, ai.roll);
+        this.aiPilotEntry.mesh.updateMatrixWorld();
+
+        const aiProp = this.aiPilotEntry.mesh.getObjectByName('propeller');
+        if (aiProp) {
+          aiProp.rotation.z += dt * 36;
+        }
+
+        const dx = ai.x - this.plane.position.x;
+        const dy = ai.y - this.plane.position.y;
+        const dz = ai.z - this.plane.position.z;
+        const dist = Math.hypot(dx, dy, dz);
+        const callsign = ai.callsign || this.rivalCallsign || 'AI PILOT';
+        const isRival = this.sim.isDustOff;
+
+        if (this.aiPilotEntry.labelSprite) {
+          const opacity = Math.max(0, Math.min(0.9, 1 - (dist - 100) / 750));
+          this.aiPilotEntry.labelSprite.material.opacity = opacity;
+          this.aiPilotEntry.labelSprite.visible = opacity > 0.02;
+          const distMeters = Math.round(dist);
+          const quantDist =
+            dist < 30
+              ? Math.floor(dist)
+              : dist < 100
+                ? Math.floor(dist / 5) * 5
+                : Math.floor(dist / 25) * 25;
+          const labelKey = `${callsign}:${isRival}:${ai.spraying}:${quantDist}`;
+          if (
+            this.aiPilotEntry.labelCanvas &&
+            this.aiPilotEntry.lastLabelKey !== labelKey &&
+            (this.aiPilotEntry.lastDistanceUpdate === undefined ||
+              nowSec - this.aiPilotEntry.lastDistanceUpdate > 0.4)
+          ) {
+            this.aiPilotEntry.lastLabelKey = labelKey;
+            this.aiPilotEntry.lastDistanceUpdate = nowSec;
+            this.drawPilotLabel(
+              this.aiPilotEntry.labelCanvas,
+              callsign,
+              isRival,
+              ai.spraying,
+              distMeters,
+            );
+            if (this.aiPilotEntry.labelSprite.material.map) {
+              this.aiPilotEntry.labelSprite.material.map.needsUpdate = true;
+            }
+          }
+        }
+
+        const count = this.aiPilotEntry.sprayLife.length;
+        const emitCount = ai.spraying
+          ? Math.min(2, Math.floor(dt * 60) || 1)
+          : 0;
+        for (let p = 0; p < emitCount; p++) {
+          const idx = this.aiPilotEntry.sprayIndex % count;
+          this.aiPilotEntry.sprayIndex = idx + 1;
+          const spread = (Math.random() - 0.5) * 14;
+          const emitPos = this._emitPosScratch
+            .set(spread, -0.8, 1.2)
+            .applyMatrix4(this.aiPilotEntry.mesh.matrixWorld);
+          this.aiPilotEntry.sprayPositions[idx * 3] = emitPos.x;
+          this.aiPilotEntry.sprayPositions[idx * 3 + 1] = emitPos.y;
+          this.aiPilotEntry.sprayPositions[idx * 3 + 2] = emitPos.z;
+          this.aiPilotEntry.sprayLife[idx] = 2.0 + Math.random() * 0.5;
+        }
+
+        let hasActiveParticles = false;
+        for (let p = 0; p < count; p++) {
+          if (this.aiPilotEntry.sprayLife[p] > 0) {
+            hasActiveParticles = true;
+            this.aiPilotEntry.sprayLife[p] -= dt;
+            this.aiPilotEntry.sprayPositions[p * 3] += cloudWind.x * dt * 0.6;
+            this.aiPilotEntry.sprayPositions[p * 3 + 1] -= dt * 4.5;
+            this.aiPilotEntry.sprayPositions[p * 3 + 2] += cloudWind.z * dt * 0.6;
+          } else {
+            this.aiPilotEntry.sprayPositions[p * 3 + 1] = -1000;
+          }
+        }
+        if (hasActiveParticles || emitCount > 0) {
+          this.aiPilotEntry.sprayPoints.geometry.attributes.position.needsUpdate =
+            true;
         }
       }
     }
@@ -2380,6 +2589,107 @@ export class World {
       ctx.fillText('● SPRAYING', w / 2, h / 2 + 18);
     }
   }
+  private makeLabel(
+    callsign: string,
+    isRival: boolean,
+    spraying: boolean,
+  ): { labelCanvas?: HTMLCanvasElement; labelSprite?: T.Sprite } {
+    if (typeof document === 'undefined') {
+      return {};
+    }
+    const labelCanvas = document.createElement('canvas');
+    labelCanvas.width = 384;
+    labelCanvas.height = 72;
+    this.drawPilotLabel(labelCanvas, callsign, isRival, spraying);
+    const labelSprite = new T.Sprite(
+      new T.SpriteMaterial({
+        map: new T.CanvasTexture(labelCanvas),
+        transparent: true,
+        depthTest: false,
+      }),
+    );
+    labelSprite.name = 'pilot-label';
+    labelSprite.position.set(0, 6, 0);
+    labelSprite.scale.set(22, 4.125, 1);
+    return { labelCanvas, labelSprite };
+  }
+  syncAiPilot(
+    ai: {
+      x: number;
+      y: number;
+      z: number;
+      heading: number;
+      roll: number;
+      speed?: number;
+      spraying: boolean;
+      callsign?: string;
+      accentColor?: string;
+    } | null,
+  ): void {
+    const isSolo = (this.sim as { matchMode?: string }).matchMode === 'solo';
+    if (!ai || isSolo) {
+      if (this.aiPilotEntry) {
+        this.aiPilotEntry.state = null;
+        this.aiPilotEntry.mesh.visible = false;
+        this.aiPilotEntry.sprayPoints.visible = false;
+      }
+      return;
+    }
+    if (!this.aiPilotEntry) {
+      const mesh = this.cloneAircraftWithoutLights();
+      const sprayPositions = new Float32Array(240 * 3);
+      const sprayLife = new Float32Array(240);
+      for (let i = 0; i < 240; i++) {
+        sprayPositions[i * 3 + 1] = -1000;
+      }
+      const sprayGeom = new T.BufferGeometry();
+      sprayGeom.setAttribute(
+        'position',
+        new T.BufferAttribute(sprayPositions, 3).setUsage(T.DynamicDrawUsage),
+      );
+      const sprayMat = new T.PointsMaterial({
+        color: '#e4fcd6',
+        size: 3.2,
+        transparent: true,
+        opacity: 0.38,
+        depthWrite: false,
+      });
+      const sprayPoints = new T.Points(sprayGeom, sprayMat);
+      sprayPoints.frustumCulled = false;
+      this.aiPilotGroup.add(sprayPoints);
+
+      const callsign = ai.callsign || this.rivalCallsign || 'AI PILOT';
+      const isRival = this.sim.isDustOff;
+      const { labelCanvas, labelSprite } = this.makeLabel(
+        callsign,
+        isRival,
+        ai.spraying,
+      );
+      if (labelSprite) {
+        mesh.add(labelSprite);
+      }
+      this.aiPilotGroup.add(mesh);
+
+      this.aiPilotEntry = {
+        mesh,
+        labelSprite,
+        labelCanvas,
+        lastLabelKey: `${callsign}:${isRival}:${ai.spraying}`,
+        sprayPoints,
+        sprayPositions,
+        sprayLife,
+        sprayIndex: 0,
+        state: ai,
+      };
+    } else {
+      this.aiPilotEntry.state = ai;
+    }
+    this.aiPilotEntry.mesh.visible = true;
+    this.aiPilotEntry.sprayPoints.visible = true;
+    this.aiPilotEntry.mesh.position.set(ai.x, ai.y, ai.z);
+    this.aiPilotEntry.mesh.rotation.order = 'YXZ';
+    this.aiPilotEntry.mesh.rotation.set(0, -ai.heading, ai.roll);
+  }
   setCounty(county: CountySnapshot | null) {
     this.skywriting.receive(
       county ? county.pilots.filter((p) => p.id !== county.viewerId) : null,
@@ -2411,7 +2721,7 @@ export class World {
     for (const pilot of live) {
       let other = this.otherPilots.get(pilot.id);
       if (!other) {
-        const mesh = this.plane.clone(true);
+        const mesh = this.cloneAircraftWithoutLights();
         mesh.visible = true;
         mesh.position.set(pilot.x, pilot.y, pilot.z);
         mesh.quaternion.setFromEuler(
@@ -2445,28 +2755,12 @@ export class World {
           new T.Euler(pilot.pitch, -pilot.heading, pilot.roll, 'YXZ'),
         );
 
-        let labelCanvas: HTMLCanvasElement | undefined;
-        let labelSprite: T.Sprite | undefined;
-        if (typeof document !== 'undefined') {
-          labelCanvas = document.createElement('canvas');
-          labelCanvas.width = 384;
-          labelCanvas.height = 72;
-          this.drawPilotLabel(
-            labelCanvas,
-            pilot.callsign,
-            pilot.callsign === this.rivalCallsign,
-            pilot.spraying,
-          );
-          labelSprite = new T.Sprite(
-            new T.SpriteMaterial({
-              map: new T.CanvasTexture(labelCanvas),
-              transparent: true,
-              depthTest: false,
-            }),
-          );
-          labelSprite.name = 'pilot-label';
-          labelSprite.position.set(0, 6, 0);
-          labelSprite.scale.set(22, 4.125, 1);
+        const { labelCanvas, labelSprite } = this.makeLabel(
+          pilot.callsign,
+          pilot.callsign === this.rivalCallsign,
+          pilot.spraying,
+        );
+        if (labelSprite) {
           mesh.add(labelSprite);
         }
 

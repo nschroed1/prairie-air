@@ -161,10 +161,11 @@
     display: none;
   }
   .flight-active .minimap.map-active {
-    width: 190px;
+    width: 170px;
   }
   .flight-active .minimap.map-active canvas {
-    height: 80px;
+    width: 170px;
+    height: 120px;
   }
   .flight-active .minimap > div,
   .flight-active .minimap footer {

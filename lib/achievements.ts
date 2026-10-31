@@ -710,17 +710,20 @@ export class AchievementManager {
     const rec = this.records.get(recordId);
     if (!rec) return false;
 
+    const rounded = Number(value.toFixed(1));
     const isNewPersonalBest =
       rec.playerValue === undefined ||
-      (rec.higherIsBetter ? value > rec.playerValue : value < rec.playerValue);
+      (rec.higherIsBetter
+        ? rounded > rec.playerValue
+        : rounded < rec.playerValue);
 
     if (!isNewPersonalBest) return false;
 
     const isNewAllTime = rec.higherIsBetter
-      ? value > rec.legendValue
-      : value < rec.legendValue;
+      ? rounded > rec.legendValue
+      : rounded < rec.legendValue;
 
-    rec.playerValue = Number(value.toFixed(1));
+    rec.playerValue = rounded;
     rec.playerDate = new Date().toLocaleDateString('en-US', {
       month: 'short',
       day: 'numeric',
@@ -784,7 +787,11 @@ export class AchievementManager {
       if ((sim.weather?.windMps ?? 0) > 6 || (sim.weather?.rain ?? 0) > 0.4) {
         totalCashAwarded += this.unlock('storm_chaser');
       }
-      if ((sim.weather?.sunlight ?? 3) < 0.6 || (sim.weather?.label?.toLowerCase().includes('night') ?? false)) {
+      if (
+        (sim as { nightMode?: boolean }).nightMode ||
+        (sim.weather?.sunlight ?? 3) < 0.6 ||
+        (sim.weather?.label?.toLowerCase().includes('night') ?? false)
+      ) {
         totalCashAwarded += this.unlock('night_owl');
       }
 

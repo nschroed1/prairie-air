@@ -1,4 +1,4 @@
-import { type Contract, fieldCellCount } from './simulation';
+import { type Contract, fieldCellCount, insideField, ground } from './simulation';
 import { achievementManager } from './achievements';
 
 export interface TandemState {
@@ -58,9 +58,9 @@ export function getTandemState(sim: any, partnerName = 'Bennett (Lead Pilot)'): 
 }
 
 export class TandemAiPartner {
-  x: number;
-  y: number;
-  z: number;
+  x = 0;
+  y = 480;
+  z = 0;
   heading = 0;
   roll = 0;
   pitch = 0;
@@ -68,6 +68,7 @@ export class TandemAiPartner {
   spraying = false;
   passIndex = 0;
   passProgress = 0;
+  turnTimer = 0;
   private passes: { start: { x: number; z: number }; end: { x: number; z: number } }[] = [];
 
   constructor(public job: Contract) {
@@ -89,14 +90,26 @@ export class TandemAiPartner {
       });
     }
 
-    this.x = this.passes[0]?.start.x ?? job.x + 60;
-    this.z = this.passes[0]?.start.z ?? job.z;
-    this.y = 480;
+    this.reset();
+  }
+
+  reset() {
+    this.passIndex = 0;
+    this.passProgress = 0;
+    this.turnTimer = 0;
+    this.spraying = false;
+    this.x = this.passes[0]?.start.x ?? this.job.x + 60;
+    this.z = this.passes[0]?.start.z ?? this.job.z;
+    this.y = ground(this.x, this.z) + (this.job.Alt ?? 14);
+    this.heading = 0;
+    this.roll = 0;
+    this.pitch = 0;
   }
 
   update(dt: number, sim: any) {
     if (this.passIndex >= this.passes.length) {
       this.spraying = false;
+      this.y = ground(this.x, this.z) + (this.job.Alt ?? 14);
       return;
     }
 
@@ -117,13 +130,16 @@ export class TandemAiPartner {
     } else {
       this.x = pass.start.x + dx * this.passProgress;
       this.z = pass.start.z + dz * this.passProgress;
-      this.y = sim.y ?? 480;
     }
+    this.y = ground(this.x, this.z) + (this.job.Alt ?? 14);
 
     // Formation proximity check
     const distToPlayer = Math.hypot(this.x - sim.x, this.z - sim.z);
     sim.partnerDistance = distToPlayer;
-    sim.inFormation = distToPlayer >= 22 && distToPlayer <= 55 && Math.abs(this.y - sim.y) < 12;
+    sim.inFormation =
+      distToPlayer >= 22 &&
+      distToPlayer <= 55 &&
+      Math.abs(this.y - sim.y) < 15;
     if (sim.inFormation) {
       sim.formationSeconds = (sim.formationSeconds ?? 0) + dt;
       achievementManager.addProgress('tandem_wingman', dt);
@@ -132,13 +148,13 @@ export class TandemAiPartner {
     if (this.spraying) {
       const size = 12;
       for (let offset = -16; offset <= 16; offset += 8) {
-        const px = this.x + Math.cos(this.heading) * offset;
-        const pz = this.z + Math.sin(this.heading) * offset;
-        const col = Math.floor((px - this.job.x + 228) / size);
-        const row = Math.floor((pz - this.job.z + 228) / size);
+        const gx = this.x + Math.cos(this.heading) * offset;
+        const gz = this.z + Math.sin(this.heading) * offset;
+        const col = Math.floor((gx - this.job.x + 228) / size);
+        const row = Math.floor((gz - this.job.z + 228) / size);
         if (col >= 0 && col < 38 && row >= 0 && row < 38) {
           const n = row * 38 + col;
-          if (!sim.partnerCovered.has(n)) {
+          if (insideField(this.job, gx, gz) && !sim.partnerCovered.has(n)) {
             sim.partnerCovered.add(n);
             sim.coverageVersion++;
           }

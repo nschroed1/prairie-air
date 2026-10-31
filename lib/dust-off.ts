@@ -1,4 +1,4 @@
-import { type Contract, fieldCellCount } from './simulation';
+import { type Contract, fieldCellCount, insideField, ground } from './simulation';
 
 export interface DustOffState {
   myCells: number;
@@ -65,9 +65,9 @@ export function getDustOffState(sim: any, rivalName = 'Miller (County Champ)'): 
 }
 
 export class DustOffAiPilot {
-  x: number;
-  y: number;
-  z: number;
+  x = 0;
+  y = 480;
+  z = 0;
   heading = 0;
   roll = 0;
   pitch = 0;
@@ -75,6 +75,7 @@ export class DustOffAiPilot {
   spraying = false;
   passIndex = 0;
   passProgress = 0;
+  turnTimer = 0;
   private passes: { start: { x: number; z: number }; end: { x: number; z: number } }[] = [];
 
   constructor(public job: Contract) {
@@ -95,14 +96,26 @@ export class DustOffAiPilot {
       });
     }
 
-    this.x = this.passes[0]?.start.x ?? job.x;
-    this.z = this.passes[0]?.start.z ?? job.z;
-    this.y = 480;
+    this.reset();
+  }
+
+  reset() {
+    this.passIndex = 0;
+    this.passProgress = 0;
+    this.turnTimer = 0;
+    this.spraying = false;
+    this.x = this.passes[0]?.start.x ?? this.job.x;
+    this.z = this.passes[0]?.start.z ?? this.job.z;
+    this.y = ground(this.x, this.z) + (this.job.Alt ?? 14);
+    this.heading = 0;
+    this.roll = 0;
+    this.pitch = 0;
   }
 
   update(dt: number, sim: any) {
     if (this.passIndex >= this.passes.length) {
       this.spraying = false;
+      this.y = ground(this.x, this.z) + (this.job.Alt ?? 14);
       return;
     }
 
@@ -123,20 +136,24 @@ export class DustOffAiPilot {
     } else {
       this.x = pass.start.x + dx * this.passProgress;
       this.z = pass.start.z + dz * this.passProgress;
-      this.y = sim.y ?? 480;
     }
+    this.y = ground(this.x, this.z) + (this.job.Alt ?? 14);
 
     if (this.spraying) {
       const size = 12;
       for (let offset = -16; offset <= 16; offset += 8) {
-        const px = this.x + Math.cos(this.heading) * offset;
-        const pz = this.z + Math.sin(this.heading) * offset;
-        const col = Math.floor((px - this.job.x + 228) / size);
-        const row = Math.floor((pz - this.job.z + 228) / size);
+        const gx = this.x + Math.cos(this.heading) * offset;
+        const gz = this.z + Math.sin(this.heading) * offset;
+        const col = Math.floor((gx - this.job.x + 228) / size);
+        const row = Math.floor((gz - this.job.z + 228) / size);
         if (col >= 0 && col < 38 && row >= 0 && row < 38) {
           const n = row * 38 + col;
-          // Swath claiming: only paint if player hasn't already claimed it
-          if (!sim.covered.has(n) && !sim.rivalCovered.has(n)) {
+          // Swath claiming: only paint if inside field and player hasn't already claimed it
+          if (
+            insideField(this.job, gx, gz) &&
+            !sim.covered.has(n) &&
+            !sim.rivalCovered.has(n)
+          ) {
             sim.rivalCovered.add(n);
             sim.coverageVersion++;
           }

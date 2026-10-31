@@ -36,9 +36,17 @@ export class CountyClient {
       try {
         const cached = localStorage.getItem('prairie-air-county-cache-v1');
         if (cached) {
-          this.snapshot = JSON.parse(cached);
-          this.status = 'County connected';
-          this.changed();
+          const parsed = JSON.parse(cached);
+          if (
+            Array.isArray(parsed?.jobs) &&
+            Array.isArray(parsed?.pilots) &&
+            parsed?.season &&
+            parsed?.player?.flight
+          ) {
+            this.snapshot = parsed;
+            this.status = 'County connected';
+            this.changed();
+          }
         }
       } catch {}
     }

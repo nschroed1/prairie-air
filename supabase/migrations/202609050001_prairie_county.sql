@@ -108,7 +108,7 @@ begin
       values(v_finished,(payload->>'season')::integer,v_id,(payload->'payout'->>'earnings')::integer,
         (payload->'payout'->>'acres')::double precision,v_coverage,(payload->'payout'->>'elapsed')::double precision,v_now);
   elsif v_active is not null then
-    update public.prairie_field_claims set coverage=v_coverage,lease_until=case when (payload->>'renew')::boolean then (payload->>'lease_until')::bigint else lease_until end
+    update public.prairie_field_claims set coverage=v_coverage,lease_until=case when (payload->>'renew')::boolean then (payload->>'lease_until')::bigint when v_action='refill' then greatest(lease_until, v_now+60000) else lease_until end
       where id=v_active and owner=v_id and completed_at is null;
   elsif v_old is not null then
     update public.prairie_field_claims set lease_until=0 where id=v_old and owner=v_id and completed_at is null;

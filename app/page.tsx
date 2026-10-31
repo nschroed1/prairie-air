@@ -32,6 +32,8 @@ import {
   Video,
   Flame,
   Crown,
+  Flag,
+  Users,
 } from 'lucide-react';
 import {
   Dialog,
@@ -115,7 +117,7 @@ import {
   SKYWRITING_PRACTICE_ID,
 } from '@/lib/skywriting';
 import { SkywritingPractice } from '@/lib/skywriting-practice';
-import { rallyContract } from '@/lib/rally';
+import { RALLY_GATES, rallyContract } from '@/lib/rally';
 import { dustOffContract, DustOffAiPilot } from '@/lib/dust-off';
 import { tandemContract, TandemAiPartner } from '@/lib/tandem';
 import { DustOffHud } from '@/components/dust-off-hud';
@@ -129,6 +131,7 @@ import { achievementManager } from '@/lib/achievements';
 import { HallOfFameModal } from '@/components/hall-of-fame-modal';
 import { AchievementToastContainer } from '@/components/achievement-toast';
 
+const STORAGE_KEY = 'prairie-air-career-v1';
 const money = (n: number) => '$' + Math.round(n).toLocaleString('en-US');
 type Panel =
   | 'briefing'
@@ -220,10 +223,11 @@ export default function Home() {
     setNightMode((curr) => {
       const next = !curr;
       nightModeRef.current = next;
+      (sim as Simulation & { nightMode?: boolean }).nightMode = next;
       world.current?.setNightMode(next);
       return next;
     });
-  }, []);
+  }, [sim]);
   const [gamepadConnected, setGamepadConnected] = useState(false);
   const prevGamepadButtons = useRef<Record<number, boolean>>({});
   const [labField, setLabField] = useState(0);
@@ -560,6 +564,9 @@ export default function Home() {
   onlineActionRef.current = onlineAction;
   const saveRef = useRef(save);
   saveRef.current = save;
+  const cycleCameraRef = useRef(cycleCamera);
+  cycleCameraRef.current = cycleCamera;
+  const startDustOffRef = useRef<() => void>(() => {});
 
   useEffect(() => {
     let disposed = false;
@@ -628,7 +635,7 @@ export default function Home() {
                   !prevGamepadButtons.current[2] &&
                   world.current
                 ) {
-                  world.current.cameraMode = 1 - world.current.cameraMode;
+                  cycleCameraRef.current();
                 }
                 if (
                   gp.buttons[1]?.pressed &&
@@ -652,6 +659,45 @@ export default function Home() {
             }
             if (sim.isTandem && aiPartner.current && sim.phase === 'flying') {
               aiPartner.current.update(dt, sim);
+            }
+            if (sim.isDustOff && aiRival.current) {
+              (
+                world.current as unknown as {
+                  syncAiPilot?: (ai: unknown) => void;
+                }
+              )?.syncAiPilot?.({
+                x: aiRival.current.x,
+                y: aiRival.current.y,
+                z: aiRival.current.z,
+                heading: aiRival.current.heading,
+                roll: aiRival.current.roll,
+                speed: aiRival.current.speed,
+                spraying: aiRival.current.spraying,
+                callsign: 'RIVAL (AI)',
+                accentColor: '#fb923c',
+              });
+            } else if (sim.matchMode === 'tandem' && aiPartner.current) {
+              (
+                world.current as unknown as {
+                  syncAiPilot?: (ai: unknown) => void;
+                }
+              )?.syncAiPilot?.({
+                x: aiPartner.current.x,
+                y: aiPartner.current.y,
+                z: aiPartner.current.z,
+                heading: aiPartner.current.heading,
+                roll: aiPartner.current.roll,
+                speed: aiPartner.current.speed,
+                spraying: aiPartner.current.spraying,
+                callsign: 'BENNETT (AI)',
+                accentColor: '#38bdf8',
+              });
+            } else {
+              (
+                world.current as unknown as {
+                  syncAiPilot?: (ai: unknown) => void;
+                }
+              )?.syncAiPilot?.(null);
             }
             client.record(dt, controls.current);
           };
@@ -720,7 +766,10 @@ export default function Home() {
         }
       }
       if (e.repeat) return;
-      if (e.code === 'Escape' || e.code === 'KeyP') {
+      if (
+        (e.code === 'Escape' || e.code === 'KeyP') &&
+        (sim.phase === 'flying' || sim.phase === 'paused')
+      ) {
         if (mode === 'public') {
           void onlineAction(sim.phase === 'flying' ? 'pause' : 'resume');
         } else if (sim.phase === 'flying') sim.phase = 'paused';
@@ -735,11 +784,19 @@ export default function Home() {
       if (e.code === 'KeyH') {
         setPanel((p) => (p === 'hall_of_fame' ? null : 'hall_of_fame'));
       }
-      if (e.code === 'KeyR' && sim.phase === 'flying') {
-        if (mode === 'public') void onlineAction('refill');
-        else {
-          sim.refill();
-          save();
+      if (e.code === 'KeyR') {
+        if (
+          mode === 'practice' &&
+          sim.isDustOff &&
+          sim.rivalCoverage >= 50
+        ) {
+          startDustOffRef.current();
+        } else if (sim.phase === 'flying') {
+          if (mode === 'public') void onlineAction('refill');
+          else {
+            sim.refill();
+            save();
+          }
         }
       }
       if (e.code === 'KeyM') {
@@ -793,6 +850,28 @@ export default function Home() {
     toggleRecording,
   ]);
   useEffect(() => {
+    const activeAiPilot =
+      mode === 'practice' && sim.isDustOff && aiRival.current
+        ? {
+            x: aiRival.current.x,
+            z: aiRival.current.z,
+            heading: aiRival.current.heading,
+            spraying: aiRival.current.spraying,
+            label: 'RIVAL',
+            color: '#fb923c',
+            isTandem: false,
+          }
+        : mode === 'practice' && sim.matchMode === 'tandem' && aiPartner.current
+          ? {
+              x: aiPartner.current.x,
+              z: aiPartner.current.z,
+              heading: aiPartner.current.heading,
+              spraying: aiPartner.current.spraying,
+              label: 'BENNETT',
+              color: '#38bdf8',
+              isTandem: true,
+            }
+          : null;
     drawMap(
       map.current,
       sim,
@@ -803,6 +882,7 @@ export default function Home() {
       race?.rival?.callsign,
       race?.rival?.pilot,
       trackUp,
+      activeAiPilot,
     );
   }, [
     revision,
@@ -837,6 +917,19 @@ export default function Home() {
         'Another wedding commission will open after a few more farm jobs. Practice is always available.',
       );
       return;
+    }
+    if (job.id === 9902) {
+      aiRival.current = new DustOffAiPilot(job);
+      aiPartner.current = null;
+    } else if (job.id === 9903) {
+      aiPartner.current = new TandemAiPartner(job);
+      aiRival.current = null;
+    } else {
+      aiRival.current = null;
+      aiPartner.current = null;
+      (
+        world.current as unknown as { syncAiPilot?: (ai: unknown) => void }
+      )?.syncAiPilot?.(null);
     }
     sim.weather = localStorm
       ? { ...LOCAL_STORM }
@@ -904,12 +997,17 @@ export default function Home() {
         sim.integrity = 100;
       }
       try {
-        sim.career = loadCareer(localStorage.getItem('prairie-air-career-v1'));
+        sim.career = loadCareer(localStorage.getItem(STORAGE_KEY));
         bests.current = loadPracticeBests(
           localStorage.getItem('prairie-air-practice-bests-v1'),
         );
       } catch {}
     }
+    aiRival.current = null;
+    aiPartner.current = null;
+    (
+      world.current as unknown as { syncAiPilot?: (ai: unknown) => void }
+    )?.syncAiPilot?.(null);
     sim.weather = localStorm ? { ...LOCAL_STORM } : practiceWeather(0, 0);
     sim.reset(
       localStorm ? stormContract() : localChallenge ? sim.job : contracts[0],
@@ -923,11 +1021,16 @@ export default function Home() {
     client.disconnect();
     if (mode === 'public' && !skyPractice.current.active) {
       try {
-        sim.career = loadCareer(localStorage.getItem('prairie-air-career-v1'));
+        sim.career = loadCareer(localStorage.getItem(STORAGE_KEY));
       } catch {}
       sim.wear = sim.clog = 0;
       sim.integrity = 100;
     }
+    aiRival.current = null;
+    aiPartner.current = null;
+    (
+      world.current as unknown as { syncAiPilot?: (ai: unknown) => void }
+    )?.syncAiPilot?.(null);
     skyPractice.current.begin(sim);
     sim.reset(
       skywritingContract(
@@ -945,57 +1048,80 @@ export default function Home() {
     Object.assign(manualControls.current, freshControls());
     refresh((v) => v + 1);
   };
-  const startRally = () => {
+  const prepareSoloSpecialMode = () => {
+    if (skyPractice.current.active) {
+      skyPractice.current.end(sim);
+    }
     client.disconnect();
-    sim.reset(rallyContract({ ...contracts[0], id: 9901 }));
-    sim.phase = 'paused';
+    if (mode === 'public') {
+      setMode('practice');
+      sim.wear = sim.clog = 0;
+      sim.integrity = 100;
+      try {
+        sim.career = loadCareer(localStorage.getItem(STORAGE_KEY));
+        bests.current = loadPracticeBests(
+          localStorage.getItem('prairie-air-practice-bests-v1'),
+        );
+      } catch {}
+    } else {
+      setMode('practice');
+    }
+    sim.weatherLocked = false;
     setLocalStorm(false);
     setLocalChallenge(false);
-    setMode('practice');
+  };
+  const startRally = () => {
+    prepareSoloSpecialMode();
+    aiRival.current = null;
+    aiPartner.current = null;
+    (
+      world.current as unknown as { syncAiPilot?: (ai: unknown) => void }
+    )?.syncAiPilot?.(null);
+    sim.reset(rallyContract({ ...contracts[0], id: 9901 }));
+    sim.phase = 'paused';
     setPanel('briefing');
     Object.assign(controls.current, freshControls());
     Object.assign(manualControls.current, freshControls());
     refresh((v) => v + 1);
   };
   const startDustOff = () => {
-    client.disconnect();
+    prepareSoloSpecialMode();
     const base = contracts[1] || contracts[0];
     const job = dustOffContract({ ...base, id: 9902 });
     aiRival.current = new DustOffAiPilot(job);
+    aiPartner.current = null;
     sim.reset(job);
     sim.phase = 'paused';
-    setLocalStorm(false);
-    setLocalChallenge(false);
-    setMode('practice');
     setPanel('briefing');
     Object.assign(controls.current, freshControls());
     Object.assign(manualControls.current, freshControls());
     refresh((v) => v + 1);
   };
+  startDustOffRef.current = startDustOff;
   const startTandem = () => {
-    client.disconnect();
+    prepareSoloSpecialMode();
     const base = contracts[2] || contracts[0];
     const job = tandemContract({ ...base, id: 9903 });
     aiPartner.current = new TandemAiPartner(job);
+    aiRival.current = null;
     sim.reset(job);
     sim.phase = 'paused';
-    setLocalStorm(false);
-    setLocalChallenge(false);
-    setMode('practice');
     setPanel('briefing');
     Object.assign(controls.current, freshControls());
     Object.assign(manualControls.current, freshControls());
     refresh((v) => v + 1);
   };
   const startFirefighting = () => {
-    client.disconnect();
+    prepareSoloSpecialMode();
+    aiRival.current = null;
+    aiPartner.current = null;
+    (
+      world.current as unknown as { syncAiPilot?: (ai: unknown) => void }
+    )?.syncAiPilot?.(null);
     const base = contracts[0];
     const job = firefightingContract({ ...base, id: 9904 });
     sim.reset(job);
     sim.phase = 'paused';
-    setLocalStorm(false);
-    setLocalChallenge(false);
-    setMode('practice');
     setPanel('briefing');
     Object.assign(controls.current, freshControls());
     Object.assign(manualControls.current, freshControls());
@@ -1193,8 +1319,8 @@ export default function Home() {
         </div>
       </header>
       <div className="location">
-        <span className="live-dot" /> BLACK HAWK COUNTY, IOWA{' '}
-        <span className="location-line" /> <span>42.47° N &nbsp; 92.31° W</span>
+        <span className="live-dot" /> O&apos;BRIEN COUNTY, IOWA{' '}
+        <span className="location-line" /> <span>43.18° N &nbsp; 95.48° W</span>
       </div>
       <button
         className="county-status"
@@ -1248,43 +1374,46 @@ export default function Home() {
           </small>
         </div>
       </div>
-      {active && (
-        <div className="compass">
-          <span>
-            {
-              ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'][
-                Math.round(((heading + 270) % 360) / 45) % 8
-              ]
-            }
-          </span>
-          <i />
-          <span>
-            {
-              ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'][
-                Math.round(((heading + 315) % 360) / 45) % 8
-              ]
-            }
-          </span>
-          <i />
-          <b>{String(heading).padStart(3, '0')}°</b>
-          <i />
-          <span>
-            {
-              ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'][
-                Math.round(((heading + 45) % 360) / 45) % 8
-              ]
-            }
-          </span>
-          <i />
-          <span>
-            {
-              ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'][
-                Math.round(((heading + 90) % 360) / 45) % 8
-              ]
-            }
-          </span>
-        </div>
-      )}
+      {active &&
+        !sim.isFirefighting &&
+        !sim.isRally &&
+        sim.matchMode === 'solo' && (
+          <div className="compass">
+            <span>
+              {
+                ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'][
+                  Math.round(((heading + 270) % 360) / 45) % 8
+                ]
+              }
+            </span>
+            <i />
+            <span>
+              {
+                ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'][
+                  Math.round(((heading + 315) % 360) / 45) % 8
+                ]
+              }
+            </span>
+            <i />
+            <b>{String(heading).padStart(3, '0')}°</b>
+            <i />
+            <span>
+              {
+                ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'][
+                  Math.round(((heading + 45) % 360) / 45) % 8
+                ]
+              }
+            </span>
+            <i />
+            <span>
+              {
+                ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'][
+                  Math.round(((heading + 90) % 360) / 45) % 8
+                ]
+              }
+            </span>
+          </div>
+        )}
       {!active && (
         <section className="welcome">
           <div className="eyebrow">
@@ -1420,7 +1549,7 @@ export default function Home() {
                 <p>
                   <MapPin size={13} />
                   {mode === 'public' && !county?.player?.activeJob
-                    ? 'Black Hawk County'
+                    ? "O'Brien County"
                     : sim.job.farmer}
                 </p>
               </div>
@@ -1648,6 +1777,7 @@ export default function Home() {
           {!sim.isSkywriting &&
             !sim.isFirefighting &&
             !sim.isRally &&
+            sim.matchMode === 'solo' &&
             sim.phase === 'flying' &&
             (() => {
               const isLocked = world.current?.arcadeFx?.isSwathLocked() ?? false;
@@ -1707,13 +1837,13 @@ export default function Home() {
             {(sim.warning.danger
               ? []
               : world.current?.arcadeFx?.getActiveBadges()
-            )?.map((badge) => (
+            )?.map((badge, i) => (
               <div
                 key={badge.id}
                 className="arcade-floating-badge"
                 style={{
                   left: '50%',
-                  top: '24%',
+                  top: `calc(24% + ${i * 44}px)`,
                   color: badge.color,
                   borderColor: badge.color,
                 }}
@@ -1940,9 +2070,13 @@ export default function Home() {
                   title="Refill tank (R)"
                   onClick={() => {
                     if (mode === 'public') void onlineAction('refill');
-                    else sim.refill();
+                    else {
+                      sim.refill();
+                      save();
+                      refresh((v) => v + 1);
+                    }
                   }}
-                  disabled={client.pending}
+                  disabled={client.actionPending}
                 >
                   Refill (R)
                 </button>
@@ -2315,6 +2449,7 @@ export default function Home() {
       >
         <DialogContent
           className="game-dialog"
+          showCloseButton={panel !== 'hall_of_fame'}
           initialFocus={panel === 'briefing' ? briefingTitle : undefined}
         >
           <DialogTitle
@@ -2565,52 +2700,253 @@ export default function Home() {
               )}
               <div
                 style={{
-                  background: 'rgba(249, 115, 22, 0.08)',
-                  border: '1px solid rgba(249, 115, 22, 0.3)',
+                  background: 'rgba(20, 48, 39, 0.55)',
+                  border: '1px solid rgba(216, 233, 168, 0.22)',
                   borderRadius: '12px',
-                  padding: '16px',
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  alignItems: 'center',
+                  padding: '14px 16px',
                   marginBottom: '12px',
                 }}
               >
-                <div>
-                  <div
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    marginBottom: '10px',
+                  }}
+                >
+                  <strong
                     style={{
                       display: 'flex',
                       alignItems: 'center',
-                      gap: '8px',
-                      color: '#fb923c',
-                      fontWeight: 700,
-                      fontSize: '14px',
+                      gap: '7px',
+                      fontSize: '13px',
+                      letterSpacing: '0.04em',
+                      color: '#e4edb7',
+                      textTransform: 'uppercase',
                     }}
                   >
-                    <Flame size={16} /> Air Tanker Wildfire Challenge
-                  </div>
-                  <p
-                    style={{
-                      margin: '4px 0 0',
-                      fontSize: '12px',
-                      color: '#a1a1aa',
-                    }}
-                  >
-                    Drop red fire-retardant payload on Cedar Valley timber
-                    brushfires. Skim the Cedar River to scoop water refills.
-                  </p>
+                    <Trophy size={15} /> Special Operations &amp; Arcade Modes
+                  </strong>
+                  <span style={{ fontSize: '11px', color: '#a3b899' }}>
+                    Solo Career Earnings Enabled
+                  </span>
                 </div>
-                <button
-                  className="primary"
-                  onClick={startFirefighting}
+                <div
                   style={{
-                    background: '#ea580c',
-                    borderColor: '#f97316',
-                    whiteSpace: 'nowrap',
-                    marginLeft: '16px',
+                    display: 'grid',
+                    gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
+                    gap: '10px',
                   }}
                 >
-                  Scramble Tanker <ArrowUpRight size={15} />
-                </button>
+                  <div
+                    style={{
+                      background: 'rgba(16, 185, 129, 0.08)',
+                      border: '1px solid rgba(16, 185, 129, 0.32)',
+                      borderRadius: '10px',
+                      padding: '12px',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      justifyContent: 'space-between',
+                      gap: '10px',
+                    }}
+                  >
+                    <div>
+                      <div
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '6px',
+                          color: '#34d399',
+                          fontWeight: 700,
+                          fontSize: '13px',
+                        }}
+                      >
+                        <Flag size={15} /> Barnstormer Rally
+                      </div>
+                      <p
+                        style={{
+                          margin: '4px 0 0',
+                          fontSize: '12px',
+                          color: '#cbd5e1',
+                          lineHeight: 1.4,
+                        }}
+                      >
+                        10-gate time-trial pylon course through barns, river
+                        bridges, and inverted airshow gates.
+                      </p>
+                    </div>
+                    <button
+                      className="primary"
+                      onClick={startRally}
+                      style={{
+                        background: '#059669',
+                        borderColor: '#10b981',
+                        color: '#ecfdf5',
+                        padding: '8px 12px',
+                        fontSize: '12px',
+                      }}
+                    >
+                      Fly Rally Course <ArrowUpRight size={14} />
+                    </button>
+                  </div>
+
+                  <div
+                    style={{
+                      background: 'rgba(245, 158, 11, 0.08)',
+                      border: '1px solid rgba(245, 158, 11, 0.32)',
+                      borderRadius: '10px',
+                      padding: '12px',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      justifyContent: 'space-between',
+                      gap: '10px',
+                    }}
+                  >
+                    <div>
+                      <div
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '6px',
+                          color: '#fbbf24',
+                          fontWeight: 700,
+                          fontSize: '13px',
+                        }}
+                      >
+                        <Crosshair size={15} /> Dust-Off 1v1
+                      </div>
+                      <p
+                        style={{
+                          margin: '4px 0 0',
+                          fontSize: '12px',
+                          color: '#cbd5e1',
+                          lineHeight: 1.4,
+                        }}
+                      >
+                        Head-to-head turf race against an AI rival duster. First
+                        pilot to treat 50% of the field wins the purse.
+                      </p>
+                    </div>
+                    <button
+                      className="primary"
+                      onClick={startDustOff}
+                      style={{
+                        background: '#d97706',
+                        borderColor: '#f59e0b',
+                        color: '#fffbeb',
+                        padding: '8px 12px',
+                        fontSize: '12px',
+                      }}
+                    >
+                      Launch 1v1 Race <ArrowUpRight size={14} />
+                    </button>
+                  </div>
+
+                  <div
+                    style={{
+                      background: 'rgba(14, 165, 233, 0.08)',
+                      border: '1px solid rgba(14, 165, 233, 0.32)',
+                      borderRadius: '10px',
+                      padding: '12px',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      justifyContent: 'space-between',
+                      gap: '10px',
+                    }}
+                  >
+                    <div>
+                      <div
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '6px',
+                          color: '#38bdf8',
+                          fontWeight: 700,
+                          fontSize: '13px',
+                        }}
+                      >
+                        <Users size={15} /> Tandem Co-Op
+                      </div>
+                      <p
+                        style={{
+                          margin: '4px 0 0',
+                          fontSize: '12px',
+                          color: '#cbd5e1',
+                          lineHeight: 1.4,
+                        }}
+                      >
+                        Fly echelon formation (25m–50m) alongside AI wingman
+                        Bennett to draft slipstream bonus pay.
+                      </p>
+                    </div>
+                    <button
+                      className="primary"
+                      onClick={startTandem}
+                      style={{
+                        background: '#0284c7',
+                        borderColor: '#38bdf8',
+                        color: '#f0f9ff',
+                        padding: '8px 12px',
+                        fontSize: '12px',
+                      }}
+                    >
+                      Fly Tandem Sortie <ArrowUpRight size={14} />
+                    </button>
+                  </div>
+
+                  <div
+                    style={{
+                      background: 'rgba(249, 115, 22, 0.08)',
+                      border: '1px solid rgba(249, 115, 22, 0.32)',
+                      borderRadius: '10px',
+                      padding: '12px',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      justifyContent: 'space-between',
+                      gap: '10px',
+                    }}
+                  >
+                    <div>
+                      <div
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '6px',
+                          color: '#fb923c',
+                          fontWeight: 700,
+                          fontSize: '13px',
+                        }}
+                      >
+                        <Flame size={15} /> Air Tanker Wildfire
+                      </div>
+                      <p
+                        style={{
+                          margin: '4px 0 0',
+                          fontSize: '12px',
+                          color: '#cbd5e1',
+                          lineHeight: 1.4,
+                        }}
+                      >
+                        Drop red Phos-Chek slurry on Cedar Valley brushfires and
+                        skim Cedar Dip Basin for water refills.
+                      </p>
+                    </div>
+                    <button
+                      className="primary"
+                      onClick={startFirefighting}
+                      style={{
+                        background: '#ea580c',
+                        borderColor: '#f97316',
+                        color: '#fff7ed',
+                        padding: '8px 12px',
+                        fontSize: '12px',
+                      }}
+                    >
+                      Scramble Tanker <ArrowUpRight size={14} />
+                    </button>
+                  </div>
+                </div>
               </div>
               {contracts.map((job, i) => (
                 <article className="contract-row" key={job.id}>
@@ -2667,13 +3003,38 @@ export default function Home() {
               career={career}
               onClose={() => setPanel(null)}
               onClaimCash={(amount) => {
+                if (amount <= 0) return;
                 if (mode === 'practice') {
                   sim.career.cash += amount;
                   sim.career.totalEarned += amount;
                   save();
-                } else if (county?.player) {
-                  county.player.flight.career.cash += amount;
-                  county.player.flight.career.totalEarned += amount;
+                  if (
+                    localStorm ||
+                    localChallenge ||
+                    skyPractice.current.active
+                  ) {
+                    try {
+                      const stored = loadCareer(
+                        localStorage.getItem(STORAGE_KEY),
+                      );
+                      stored.cash += amount;
+                      stored.totalEarned += amount;
+                      localStorage.setItem(STORAGE_KEY, JSON.stringify(stored));
+                    } catch {}
+                  }
+                } else {
+                  try {
+                    const stored = loadCareer(
+                      localStorage.getItem(STORAGE_KEY),
+                    );
+                    stored.cash += amount;
+                    stored.totalEarned += amount;
+                    localStorage.setItem(STORAGE_KEY, JSON.stringify(stored));
+                  } catch {}
+                  if (county?.player) {
+                    county.player.flight.career.cash += amount;
+                    county.player.flight.career.totalEarned += amount;
+                  }
                 }
                 sound.cue?.('cash-register');
                 refresh((v) => v + 1);
@@ -2779,6 +3140,15 @@ function drawMap(
   rivalCallsign?: string | null,
   rivalPilotId?: string | null,
   trackUp = false,
+  aiPilot?: {
+    x: number;
+    z: number;
+    heading: number;
+    spraying: boolean;
+    label: string;
+    color: string;
+    isTandem?: boolean;
+  } | null,
 ) {
   const ctx = canvas?.getContext('2d');
   if (!ctx || !canvas) return;
@@ -2790,10 +3160,12 @@ function drawMap(
   }
   const tacticalScale = sim.isFirefighting
     ? 0.42
-    : Math.min(
-        w / (fieldSize(sim.job).width + 150),
-        h / (fieldSize(sim.job).depth + 150),
-      );
+    : sim.isRally
+      ? 0.14
+      : Math.min(
+          w / (fieldSize(sim.job).width + 150),
+          h / (fieldSize(sim.job).depth + 150),
+        );
   const scale =
     sim.phase === 'ready'
       ? 0.13
@@ -2804,6 +3176,8 @@ function drawMap(
           : tacticalScale;
   const cx = sim.isFirefighting ? -280 : sim.job.x,
     cz = sim.isFirefighting ? 225 : sim.job.z;
+  let activeTargetX = cx,
+    activeTargetZ = cz;
   const px = (x: number) => (x - cx) * scale + w / 2,
     pz = (z: number) => (z - cz) * scale + h / 2;
   ctx.fillStyle = '#354e37';
@@ -2816,7 +3190,27 @@ function drawMap(
     ctx.translate(w / 2, h / 2);
     ctx.rotate(-sim.heading);
     ctx.translate(-w / 2, -h / 2);
+    ctx.fillStyle = '#354e37';
+    ctx.fillRect(-w, -h, w * 3, h * 3);
   }
+  const drawLabel = (
+    tx: number,
+    tz: number,
+    text: string,
+    offsetX = 0,
+    offsetY = 0,
+    northUpAngle = 0,
+  ) => {
+    ctx.save();
+    ctx.translate(tx, tz);
+    if (shouldRotate) {
+      ctx.rotate(sim.heading);
+    } else if (northUpAngle !== 0) {
+      ctx.rotate(northUpAngle);
+    }
+    ctx.fillText(text, offsetX, offsetY);
+    ctx.restore();
+  };
   const polygonPath = (job: {
     x: number;
     z: number;
@@ -2843,38 +3237,38 @@ function drawMap(
   }
   ctx.strokeStyle = '#96a17e';
   ctx.lineWidth = 2;
-  for (let i = -3; i <= 3; i++) {
+  for (let i = -4; i <= 4; i++) {
     const rx = cx + i * 510 + 255;
     const rz = cz + i * 510 + 255;
     ctx.beginPath();
-    ctx.moveTo(px(rx), 0);
-    ctx.lineTo(px(rx), h);
+    ctx.moveTo(px(rx), -h);
+    ctx.lineTo(px(rx), h * 2);
     ctx.stroke();
     ctx.beginPath();
-    ctx.moveTo(0, pz(rz));
-    ctx.lineTo(w, pz(rz));
+    ctx.moveTo(-w, pz(rz));
+    ctx.lineTo(w * 2, pz(rz));
     ctx.stroke();
   }
   // County Road B14 (280th St) paved secondary highway at Z = -1785
   const b14Z = pz(-1785);
-  if (b14Z >= 0 && b14Z <= h) {
+  if (b14Z >= -h && b14Z <= h * 2) {
     ctx.strokeStyle = '#383838';
     ctx.lineWidth = 3.5;
     ctx.beginPath();
-    ctx.moveTo(0, b14Z);
-    ctx.lineTo(w, b14Z);
+    ctx.moveTo(-w, b14Z);
+    ctx.lineTo(w * 2, b14Z);
     ctx.stroke();
     ctx.strokeStyle = '#facc15';
     ctx.lineWidth = 1;
     ctx.beginPath();
-    ctx.moveTo(0, b14Z);
-    ctx.lineTo(w, b14Z);
+    ctx.moveTo(-w, b14Z);
+    ctx.lineTo(w * 2, b14Z);
     ctx.stroke();
   }
   ctx.strokeStyle = '#6fa0a3';
   ctx.lineWidth = 12;
   ctx.beginPath();
-  for (let z = cz - 1200; z < cz + 1200; z += 30) {
+  for (let z = cz - 1800; z < cz + 1800; z += 30) {
     const x = 980 + Math.sin(z * 0.0017) * 260 + Math.sin(z * 0.0033) * 65;
     ctx.lineTo(px(x), pz(z));
   }
@@ -2889,54 +3283,73 @@ function drawMap(
     // Yew Avenue (X = -255)
     const yewX = px(-255);
     if (yewX > 20 && yewX < w - 20) {
-      ctx.save();
       ctx.fillStyle = 'rgba(235, 240, 220, 0.85)';
-      ctx.translate(yewX - 7, Math.min(Math.max(40, h / 2), h - 40));
-      ctx.rotate(-Math.PI / 2);
-      ctx.fillText('YEW AVE', 0, 0);
-      ctx.restore();
+      drawLabel(
+        yewX - 7,
+        Math.min(Math.max(40, h / 2), h - 40),
+        'YEW AVE',
+        0,
+        0,
+        -Math.PI / 2,
+      );
     }
 
     // 290th Street (Z = -255)
     const st290Z = pz(-255);
     if (st290Z > 15 && st290Z < h - 15) {
       ctx.fillStyle = 'rgba(235, 240, 220, 0.85)';
-      ctx.fillText('290TH ST', Math.min(Math.max(50, w / 2), w - 50), st290Z - 6);
+      drawLabel(
+        Math.min(Math.max(50, w / 2), w - 50),
+        st290Z - 6,
+        '290TH ST',
+      );
     }
 
     // 300th Street (Z = 255)
     const st300Z = pz(255);
     if (st300Z > 15 && st300Z < h - 15) {
       ctx.fillStyle = 'rgba(235, 240, 220, 0.85)';
-      ctx.fillText('300TH ST', Math.min(Math.max(50, w / 2), w - 50), st300Z + 7);
+      drawLabel(
+        Math.min(Math.max(50, w / 2), w - 50),
+        st300Z + 7,
+        '300TH ST',
+      );
     }
 
     // County Road B14 (Z = -1785)
     if (b14Z > 15 && b14Z < h - 15) {
       ctx.fillStyle = 'rgba(250, 204, 21, 0.9)';
-      ctx.fillText('CO RD B14 / 280TH ST', Math.min(Math.max(80, w / 2), w - 80), b14Z - 6);
+      drawLabel(
+        Math.min(Math.max(80, w / 2), w - 80),
+        b14Z - 6,
+        'CO RD B14 / 280TH ST',
+      );
     }
 
     // Ocheyedan River label
     const rivX = px(980);
     if (rivX > 25 && rivX < w - 25) {
-      ctx.save();
       ctx.fillStyle = 'rgba(180, 225, 240, 0.9)';
-      ctx.translate(rivX + 16, Math.min(Math.max(50, h / 2), h - 50));
-      ctx.rotate(Math.PI / 2);
-      ctx.fillText('OCHEYEDAN RIVER', 0, 0);
-      ctx.restore();
+      drawLabel(
+        rivX + 16,
+        Math.min(Math.max(50, h / 2), h - 50),
+        'OCHEYEDAN RIVER',
+        0,
+        0,
+        Math.PI / 2,
+      );
     }
 
     // Yew Ave Home Farmstead & Airstrip
-    const hx = px(-315), hz = pz(-195);
+    const hx = px(-315),
+      hz = pz(-195);
     if (hx > 15 && hx < w - 15 && hz > 15 && hz < h - 15) {
       ctx.fillStyle = '#ef4444';
       ctx.beginPath();
       ctx.arc(hx, hz, 3.5, 0, Math.PI * 2);
       ctx.fill();
       ctx.fillStyle = '#ffffff';
-      ctx.fillText('YEW AVE STRIP', hx, hz - 8);
+      drawLabel(hx, hz, 'YEW AVE STRIP', 0, -8);
     }
   }
   if (sim.isFirefighting && sim.firefightingState) {
@@ -2956,7 +3369,7 @@ function drawMap(
     ctx.font = 'bold 8.5px sans-serif';
     ctx.textAlign = 'center';
     ctx.fillStyle = '#bae6fd';
-    ctx.fillText('DIP BASIN', pondX, pondZ - pondR - 5);
+    drawLabel(pondX, pondZ, 'DIP BASIN', 0, -pondR - 5);
     ctx.restore();
 
     // 2. Crimson Phos-Chek Retardant Drops
@@ -2994,7 +3407,13 @@ function drawMap(
 
       if (!isOut) {
         ctx.beginPath();
-        ctx.arc(sx, sz, Math.max(2.5, sr * 0.42 * spot.intensity), 0, Math.PI * 2);
+        ctx.arc(
+          sx,
+          sz,
+          Math.max(2.5, sr * 0.42 * spot.intensity),
+          0,
+          Math.PI * 2,
+        );
         ctx.fillStyle = '#fef08a';
         ctx.fill();
       }
@@ -3005,8 +3424,133 @@ function drawMap(
       ctx.fillStyle = isOut ? '#6ee7b7' : '#ffffff';
       ctx.shadowColor = '#000000';
       ctx.shadowBlur = 3;
-      ctx.fillText(`H${spot.id + 1}`, sx, sz - sr - 5);
+      drawLabel(sx, sz, `H${spot.id + 1}`, 0, -sr - 5);
       ctx.restore();
+    }
+  } else if (sim.isRally && sim.rallyState) {
+    const currentGateIdx =
+      (sim.rallyState as { currentGateIndex?: number; gateIndex?: number })
+        .currentGateIndex ??
+      sim.rallyState.gateIndex ??
+      0;
+    const targetGate =
+      RALLY_GATES[Math.min(RALLY_GATES.length - 1, currentGateIdx)];
+    if (targetGate) {
+      activeTargetX = targetGate.x;
+      activeTargetZ = targetGate.z;
+    }
+
+    // Course connector polyline
+    ctx.save();
+    ctx.strokeStyle = 'rgba(250, 204, 21, 0.38)';
+    ctx.lineWidth = 1.8;
+    ctx.setLineDash([4, 3]);
+    ctx.beginPath();
+    RALLY_GATES.forEach((gate, idx) => {
+      if (idx === 0) ctx.moveTo(px(gate.x), pz(gate.z));
+      else ctx.lineTo(px(gate.x), pz(gate.z));
+    });
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.restore();
+
+    // Rally Gates
+    const pulse = 0.5 + 0.5 * Math.sin((sim.elapsed || 0) * 6);
+    RALLY_GATES.forEach((gate, idx) => {
+      const gx = px(gate.x);
+      const gz = pz(gate.z);
+      const isPassed = idx < currentGateIdx || sim.rallyState!.completed;
+      const isCurrent = idx === currentGateIdx && !sim.rallyState!.completed;
+
+      ctx.save();
+      ctx.beginPath();
+      const r = isCurrent ? 5.5 + pulse * 2 : 4;
+      ctx.arc(gx, gz, r, 0, Math.PI * 2);
+      if (isPassed) {
+        ctx.fillStyle = '#4ade80';
+        ctx.strokeStyle = '#166534';
+        ctx.lineWidth = 1.5;
+      } else if (isCurrent) {
+        ctx.fillStyle = '#facc15';
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = 1.8;
+        ctx.shadowColor = '#facc15';
+        ctx.shadowBlur = 8;
+      } else {
+        ctx.fillStyle = 'rgba(251, 191, 36, 0.55)';
+        ctx.strokeStyle = 'rgba(250, 204, 21, 0.8)';
+        ctx.lineWidth = 1.2;
+      }
+      ctx.fill();
+      ctx.stroke();
+
+      ctx.font = 'bold 8.5px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillStyle = isPassed
+        ? '#bbf7d0'
+        : isCurrent
+          ? '#fef08a'
+          : 'rgba(254, 240, 138, 0.78)';
+      ctx.shadowColor = '#000000';
+      ctx.shadowBlur = 3;
+      drawLabel(gx, gz, `${idx + 1}`, 0, -r - 5);
+      ctx.restore();
+    });
+
+    // Off-screen pointer to current Rally gate if outside minimap viewport
+    if (targetGate && !sim.rallyState.completed) {
+      const tScreenX = px(activeTargetX);
+      const tScreenZ = pz(activeTargetZ);
+      const gateOffScreen =
+        tScreenX < 10 || tScreenX > w - 10 || tScreenZ < 10 || tScreenZ > h - 10;
+      if (gateOffScreen) {
+        const angleToGate = Math.atan2(
+          activeTargetZ - sim.z,
+          activeTargetX - sim.x,
+        );
+        const edgeX = Math.max(
+          14,
+          Math.min(w - 14, w / 2 + Math.cos(angleToGate) * (w / 2 - 14)),
+        );
+        const edgeZ = Math.max(
+          14,
+          Math.min(h - 14, h / 2 + Math.sin(angleToGate) * (h / 2 - 14)),
+        );
+        const gateDistM = Math.round(
+          Math.hypot(activeTargetX - sim.x, activeTargetZ - sim.z),
+        );
+        ctx.save();
+        ctx.translate(edgeX, edgeZ);
+        ctx.rotate(angleToGate + Math.PI / 2);
+        ctx.fillStyle = '#facc15';
+        ctx.shadowColor = '#ca8a04';
+        ctx.shadowBlur = 8;
+        ctx.beginPath();
+        ctx.moveTo(0, -7);
+        ctx.lineTo(5, 4);
+        ctx.lineTo(0, 1.5);
+        ctx.lineTo(-5, 4);
+        ctx.closePath();
+        ctx.fill();
+        ctx.restore();
+
+        ctx.save();
+        ctx.font = 'bold 8.5px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillStyle = '#fef08a';
+        ctx.shadowColor = '#000000';
+        ctx.shadowBlur = 3;
+        drawLabel(
+          edgeX,
+          edgeZ,
+          `G${currentGateIdx + 1} · ${gateDistM}m`,
+          0,
+          edgeZ > h / 2 ? -10 : 10,
+        );
+        ctx.restore();
+      }
     }
   } else if (!sim.isRally) {
     ctx.fillStyle = '#c5dd6540';
@@ -3147,6 +3691,102 @@ function drawMap(
     ctx.restore();
   }
 
+  // Draw AI Rival (Dust-Off) or AI Partner (Tandem) on minimap
+  if (aiPilot) {
+    const aiX = px(aiPilot.x);
+    const aiZ = pz(aiPilot.z);
+    const aiOnScreen =
+      aiX >= 8 && aiX <= w - 8 && aiZ >= 8 && aiZ <= h - 8;
+
+    if (aiPilot.isTandem) {
+      // 25m-50m formation ring around Bennett
+      const innerR = Math.max(4, 25 * scale);
+      const outerR = Math.max(8, 50 * scale);
+      ctx.save();
+      ctx.strokeStyle = 'rgba(56, 189, 248, 0.55)';
+      ctx.fillStyle = 'rgba(56, 189, 248, 0.12)';
+      ctx.lineWidth = 1.25;
+      ctx.setLineDash([3, 3]);
+      ctx.beginPath();
+      ctx.arc(aiX, aiZ, outerR, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.arc(aiX, aiZ, innerR, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.restore();
+    }
+
+    if (aiOnScreen) {
+      ctx.save();
+      ctx.translate(aiX, aiZ);
+      ctx.rotate(aiPilot.heading);
+      if (aiPilot.spraying) {
+        ctx.strokeStyle = '#84cc16';
+        ctx.lineWidth = 2.5;
+        ctx.beginPath();
+        ctx.moveTo(0, 4);
+        ctx.lineTo(0, 12);
+        ctx.stroke();
+      }
+      ctx.fillStyle = aiPilot.color;
+      ctx.strokeStyle = '#0f172a';
+      ctx.lineWidth = 1.2;
+      ctx.beginPath();
+      ctx.moveTo(0, -7);
+      ctx.lineTo(5, 5);
+      ctx.lineTo(0, 2);
+      ctx.lineTo(-5, 5);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+      ctx.restore();
+
+      ctx.save();
+      ctx.font = 'bold 9px sans-serif';
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'middle';
+      ctx.fillStyle = aiPilot.color;
+      ctx.shadowColor = '#000000';
+      ctx.shadowBlur = 3;
+      drawLabel(aiX, aiZ, aiPilot.label, 7, 0);
+      ctx.restore();
+    } else {
+      const angle = Math.atan2(aiPilot.z - sim.z, aiPilot.x - sim.x);
+      const edgeX = Math.max(
+        12,
+        Math.min(w - 12, w / 2 + Math.cos(angle) * (w / 2 - 14)),
+      );
+      const edgeZ = Math.max(
+        12,
+        Math.min(h - 12, h / 2 + Math.sin(angle) * (h / 2 - 14)),
+      );
+      ctx.save();
+      ctx.translate(edgeX, edgeZ);
+      ctx.rotate(angle + Math.PI / 2);
+      ctx.fillStyle = aiPilot.color;
+      ctx.beginPath();
+      ctx.moveTo(0, -5);
+      ctx.lineTo(3.5, 3.5);
+      ctx.lineTo(0, 1);
+      ctx.lineTo(-3.5, 3.5);
+      ctx.closePath();
+      ctx.fill();
+      ctx.restore();
+
+      ctx.save();
+      ctx.font = 'bold 8px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillStyle = aiPilot.color;
+      ctx.shadowColor = '#000000';
+      ctx.shadowBlur = 3;
+      drawLabel(edgeX, edgeZ, aiPilot.label, 0, edgeZ > h / 2 ? -8 : 8);
+      ctx.restore();
+    }
+  }
+
   const planeScreenX = px(sim.x);
   const planeScreenZ = pz(sim.z);
   const isOffScreen =
@@ -3172,7 +3812,9 @@ function drawMap(
     ctx.restore();
   } else {
     // Off-screen needle indicator
-    const distMeters = Math.round(Math.hypot(sim.x - cx, sim.z - cz));
+    const distMeters = Math.round(
+      Math.hypot(sim.x - activeTargetX, sim.z - activeTargetZ),
+    );
     const edgeX = Math.max(14, Math.min(w - 14, planeScreenX));
     const edgeZ = Math.max(14, Math.min(h - 14, planeScreenZ));
     const angleToPlane = Math.atan2(planeScreenZ - h / 2, planeScreenX - w / 2);
@@ -3195,6 +3837,8 @@ function drawMap(
     // Distance badge
     ctx.save();
     ctx.font = 'bold 9px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
     ctx.fillStyle = '#ffffff';
     ctx.shadowColor = '#000000';
     ctx.shadowBlur = 4;
@@ -3205,7 +3849,7 @@ function drawMap(
       Math.min(w - textWidth / 2 - 4, edgeX),
     );
     const badgeZ = edgeZ > h / 2 ? edgeZ - 11 : edgeZ + 15;
-    ctx.fillText(text, badgeX - textWidth / 2, badgeZ);
+    drawLabel(badgeX, badgeZ, text);
     ctx.restore();
   }
   for (const pilot of pilots) {
@@ -3250,11 +3894,13 @@ function drawMap(
       // Callsign tag
       ctx.save();
       ctx.font = 'bold 9px sans-serif';
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'middle';
       const tag = isRival ? `★ ${pilot.callsign}` : pilot.callsign;
       ctx.fillStyle = isRival ? '#fef08a' : '#e0f2fe';
       ctx.shadowColor = '#000000';
       ctx.shadowBlur = 3;
-      ctx.fillText(tag, screenX + 7, screenZ + 3);
+      drawLabel(screenX, screenZ, tag, 7, 0);
       ctx.restore();
     } else {
       // Off-screen radar pip on border (pointing from player's aircraft position)
@@ -3287,12 +3933,14 @@ function drawMap(
       // Small distance text near pip
       ctx.save();
       ctx.font = '8px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
       ctx.fillStyle = isRival ? '#fef08a' : '#93c5fd';
       ctx.shadowColor = '#000000';
       ctx.shadowBlur = 3;
-      const textX = Math.max(14, Math.min(w - 28, edgeX - 8));
-      const textZ = edgeZ > h / 2 ? edgeZ - 6 : edgeZ + 12;
-      ctx.fillText(distText, textX, textZ);
+      const textX = Math.max(14, Math.min(w - 14, edgeX));
+      const textZ = edgeZ > h / 2 ? edgeZ - 8 : edgeZ + 10;
+      drawLabel(textX, textZ, distText);
       ctx.restore();
     }
   }

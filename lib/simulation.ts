@@ -115,6 +115,7 @@ export type Contract = {
   difficulty: string;
   width?: number;
   depth?: number;
+  Alt?: number;
   windStrength?: number;
   briefing?: string;
   boundary?: readonly FieldPoint[];
@@ -354,6 +355,7 @@ export class Simulation {
   lastSprayExitTime = -100;
   lastSprayExitHeading = 0;
   weatherLocked = false;
+  nightMode = false;
   arcade: ArcadeTracker = new ArcadeTracker();
   stunts = new StuntTracker();
   skywriting = freshSkywriting();
@@ -426,6 +428,14 @@ export class Simulation {
     }
     return Math.min(100, (this.covered.size / fieldCellCount(this.job)) * 100);
   }
+  get rivalCoverage() {
+    const total = Math.max(1, fieldCellCount(this.job));
+    return Math.min(100, (this.rivalCovered.size / total) * 100);
+  }
+  get partnerCoverage() {
+    const total = Math.max(1, fieldCellCount(this.job));
+    return Math.min(100, (this.partnerCovered.size / total) * 100);
+  }
   get isSkywriting() {
     return isSkywriting(this.job);
   }
@@ -438,7 +448,7 @@ export class Simulation {
       const total = Math.max(1, fieldCellCount(this.job));
       const myCov = (this.covered.size / total) * 100;
       const rivalCov = (this.rivalCovered.size / total) * 100;
-      return myCov >= 50 || myCov + rivalCov >= 90;
+      return myCov >= 50 || rivalCov >= 50 || myCov + rivalCov >= 90;
     }
     return this.coverage >= this.job.target;
   }
@@ -803,7 +813,7 @@ export class Simulation {
             : this.rallyState.medal === 'bronze'
               ? 150
               : 0;
-      const stunt = this.bankedStuntBonus;
+      const stunt = this.bankedStuntBonus + (this.result.stuntBonus ?? 0);
       const gross = Math.max(0, this.job.pay + parBonus + stunt);
       const maintenance = Math.min(gross, this.career.maintenanceDebt ?? 0);
       const repairs = Math.min(gross - maintenance, this.career.repairDebt ?? 0);
@@ -836,6 +846,14 @@ export class Simulation {
         this.career.completed.push(this.job.id);
       this.phase = 'complete';
       this.spraying = false;
+      achievementManager.evaluateFlightEnd(this);
+      if (this.sortieStuntCount > 0) {
+        achievementManager.submitRecord(
+          'sortie_stunt_chain',
+          this.sortieStuntCount,
+          'Ag-Cat Sprayer',
+        );
+      }
       return true;
     }
     if (this.isFirefighting && this.firefightingState) {
@@ -847,14 +865,24 @@ export class Simulation {
         0,
         this.job.pay + bonus + speedBonus + this.pendingSkillBonus,
       );
+      const maintenance = Math.min(gross, this.career.maintenanceDebt ?? 0);
+      const repairs = Math.min(gross - maintenance, this.career.repairDebt ?? 0);
+      this.career.maintenanceDebt = Math.max(
+        0,
+        (this.career.maintenanceDebt ?? 0) - maintenance,
+      );
+      this.career.repairDebt = Math.max(
+        0,
+        (this.career.repairDebt ?? 0) - repairs,
+      );
       this.result = {
         pay: this.job.pay,
         bonus,
         coverage: Math.round(contained * 100),
         penalty: 0,
-        total: gross,
-        maintenance: 0,
-        repairs: 0,
+        total: gross - maintenance - repairs,
+        maintenance,
+        repairs,
         debt: this.serviceDue,
         oversprayAcres: 0,
         stuntBonus: stunt,
@@ -868,6 +896,14 @@ export class Simulation {
         this.career.completed.push(this.job.id);
       this.phase = 'complete';
       this.spraying = false;
+      achievementManager.evaluateFlightEnd(this);
+      if (this.sortieStuntCount > 0) {
+        achievementManager.submitRecord(
+          'sortie_stunt_chain',
+          this.sortieStuntCount,
+          'Ag-Cat Sprayer',
+        );
+      }
       return true;
     }
     const wonDustOff = this.isDustOff
@@ -1062,18 +1098,13 @@ export class Simulation {
       stallSink;
     this.y = Math.min(this.y, 600);
     const minSafeAltitude = this.isFirefighting ? 2.0 : 3.0;
-    if (
-      this.altitude < minSafeAltitude ||
-      (!this.isFirefighting &&
-        Math.abs(this.x - riverX(this.z)) < 40 &&
-        this.y < 10)
-    ) {
+    if (this.altitude < minSafeAltitude) {
       this.crash('Terrain strike · climb early over hills and riverbanks.');
       return;
     }
     this.stepHazards(dt);
     if (this.phase !== 'flying') return;
-    if (this.speed >= 48) {
+    if ((this.speed >= 68 && this.pitch < -0.15) || this.speed >= 72) {
       achievementManager.setProgress('sound_barrier', 1);
     }
     if (this.altitude >= 3.0 && this.altitude <= 6.2) {
@@ -1344,7 +1375,13 @@ export class Simulation {
             2.6,
             (clearWidth - 20.0) / 2 + 1.5,
           );
-          const aligned = Math.abs(Math.sin(this.heading)) < 0.38;
+          const aligned =
+            Math.abs(
+              Math.sin(
+                this.heading -
+                  ((obstacle as { rotationY?: number }).rotationY ?? 0),
+              ),
+            ) < 0.38;
           const centered = Math.abs(dx) < maxCorridorOffset;
           const wingsLevel = Math.abs(this.roll) < 0.28;
           const inverted = Math.abs(this.roll) > 2.6;
@@ -1537,9 +1574,7 @@ export function loadCareer(raw: string | null): Career {
       cash: data.cash,
       completed: data.completed.filter(
         (x: unknown) =>
-          typeof x === 'number' &&
-          x >= 0 &&
-          (x < contracts.length || x === SKYWRITING_PRACTICE_ID),
+          typeof x === 'number' && Number.isInteger(x) && x >= 0,
       ),
       upgrades: {
         tank: clamp(Math.floor(Number(data.upgrades.tank) || 0), 0, 3),

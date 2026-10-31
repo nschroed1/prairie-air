@@ -356,25 +356,85 @@ export function FlightDebrief({
 }) {
   'use no memo';
   const result = sim.result;
+  const isRally = sim.isRally && Boolean(sim.rallyState);
+  const isFirefighting = sim.isFirefighting && Boolean(sim.firefightingState);
+  const isDustOff = sim.isDustOff;
+  const isTandem = sim.isTandem;
+
+  const hotspotsDoused = sim.firefightingState
+    ? sim.firefightingState.hotspots.filter((h) => h.intensity <= 0.06).length
+    : 0;
+  const totalHotspots = sim.firefightingState?.hotspots.length ?? 6;
+  const containmentPct = Math.round(
+    (sim.firefightingState?.containedFraction ?? 1) * 100,
+  );
+  const rallyGatesCleared = sim.rallyState?.gateIndex ?? 10;
+  const rallyMedal = (sim.rallyState?.medal ?? 'bronze').toUpperCase();
+  const rallyTime = sim.rallyState?.finalTime || sim.elapsed;
+  const tandemCombined = Math.min(100, result.coverage + sim.partnerCoverage);
+  const formationSecs = Math.round(
+    (sim as Simulation & { formationBonusSeconds?: number })
+      .formationBonusSeconds ?? 0,
+  );
+
+  const modeTip = isRally
+    ? `You cleared ${rallyGatesCleared}/10 rally gates in ${ rallyTime.toFixed(1) }s (${rallyMedal} medal). Thread the barn breezeway or inverted gates to shave extra stunt seconds off your time.`
+    : isFirefighting
+      ? `You doused ${hotspotsDoused}/${totalHotspots} timber hotspots (${containmentPct}% containment) in ${duration(sim.elapsed)}. Skim Cedar Dip Basin below 26 ft AGL for rapid Phos-Chek slurry refills.`
+      : isDustOff
+        ? `Final turf split: You ${result.coverage.toFixed(1)}% vs Rival ${sim.rivalCoverage.toFixed(1)}%. Lock onto adjacent swaths early and bank tight wingovers at field edges to outpace the rival duster.`
+        : isTandem
+          ? `Combined coverage reached ${tandemCombined.toFixed(1)}% (${result.coverage.toFixed(1)}% you + ${sim.partnerCoverage.toFixed(1)}% Bennett). Stay within 25m–50m echelon formation to draft slipstream bonus pay.`
+          : debriefTip(sim);
+
   return (
     <div className="state-overlay debrief-overlay">
       <section className="flight-debrief" aria-label="Flight debrief">
         <div className="debrief-heading">
           <span className="lesson-kicker">
-            <Flag size={17} /> CONTRACT COMPLETE
+            <Flag size={17} />{' '}
+            {isRally
+              ? `BARNSTORMER RALLY · ${rallyMedal} MEDAL`
+              : isFirefighting
+                ? 'WILDFIRE DISPATCH COMPLETE'
+                : isDustOff
+                  ? 'DUST-OFF 1v1 COMPLETE'
+                  : isTandem
+                    ? 'TANDEM CO-OP COMPLETE'
+                    : 'CONTRACT COMPLETE'}
           </span>
           <span>{duration(sim.elapsed)} in the air</span>
         </div>
         <h2>
-          {result.bonus ? 'That’s a beautiful finish.' : 'Good work, pilot.'}
+          {isRally
+            ? `${rallyMedal} Medal Finish!`
+            : isFirefighting
+              ? 'Timber Ridge fire contained.'
+              : isDustOff
+                ? result.coverage >= sim.rivalCoverage
+                  ? 'You took the turf crown!'
+                  : 'Hard-fought 1v1 race.'
+                : isTandem
+                  ? 'Seamless formation sortie.'
+                  : result.bonus
+                    ? 'That’s a beautiful finish.'
+                    : 'Good work, pilot.'}
         </h2>
         <p className="farmer-response">
           {sim.job.farmer}: “
-          {result.penalty > 0
-            ? 'Thanks for the coverage. Keep the spray inside our flags next time.'
-            : result.bonus
-              ? 'Every strip cared for. You’ve earned that extra.'
-              : 'That’s the coverage we needed. Thank you.'}
+          {isRally
+            ? `What a show through all ${rallyGatesCleared} gates! The county fairgrounds crowd could hear that radial engine roaring across the valley.`
+            : isFirefighting
+              ? `You knocked down ${hotspotsDoused} of ${totalHotspots} brushfire hotspots before the embers reached the timberline. Cedar Valley owes you one.`
+              : isDustOff
+                ? `You covered ${result.coverage.toFixed(1)}% against your rival’s ${sim.rivalCoverage.toFixed(1)}%. Fast passes and sharp turns!`
+                : isTandem
+                  ? `Flying wing-to-wing with Bennett got ${tandemCombined.toFixed(1)}% of our acreage treated in record time.`
+                  : result.penalty > 0
+                    ? 'Thanks for the coverage. Keep the spray inside our flags next time.'
+                    : result.bonus
+                      ? 'Every strip cared for. You’ve earned that extra.'
+                      : 'That’s the coverage we needed. Thank you.'}
           ”
         </p>
         <div className="debrief-body">
@@ -391,8 +451,43 @@ export function FlightDebrief({
           </div>
           <div>
             <div className="debrief-coverage">
-              <strong>{result.coverage.toFixed(1)}%</strong>
-              <span>of the plot covered</span>
+              {isRally ? (
+                <>
+                  <strong>{rallyTime.toFixed(1)}s</strong>
+                  <span>
+                    {rallyGatesCleared} / 10 gates · {rallyMedal} MEDAL
+                  </span>
+                </>
+              ) : isFirefighting ? (
+                <>
+                  <strong>{containmentPct}%</strong>
+                  <span>
+                    contained · {hotspotsDoused} / {totalHotspots} hotspots
+                    doused
+                  </span>
+                </>
+              ) : isDustOff ? (
+                <>
+                  <strong>
+                    {result.coverage.toFixed(1)}% vs{' '}
+                    {sim.rivalCoverage.toFixed(1)}%
+                  </strong>
+                  <span>player vs rival coverage split</span>
+                </>
+              ) : isTandem ? (
+                <>
+                  <strong>{tandemCombined.toFixed(1)}%</strong>
+                  <span>
+                    combined ({result.coverage.toFixed(1)}% you ·{' '}
+                    {sim.partnerCoverage.toFixed(1)}% partner)
+                  </span>
+                </>
+              ) : (
+                <>
+                  <strong>{result.coverage.toFixed(1)}%</strong>
+                  <span>of the plot covered</span>
+                </>
+              )}
             </div>
             <dl className="debrief-receipt">
               <div>
@@ -400,9 +495,44 @@ export function FlightDebrief({
                 <dd>{money(result.pay)}</dd>
               </div>
               <div>
-                <dt>Precision bonus</dt>
+                <dt>
+                  {isRally
+                    ? `Medal bonus (${rallyMedal})`
+                    : isFirefighting
+                      ? 'Containment bonus'
+                      : isTandem
+                        ? 'Co-op & formation bonus'
+                        : 'Precision bonus'}
+                </dt>
                 <dd>+{money(result.bonus)}</dd>
               </div>
+              {isRally && (
+                <div>
+                  <dt>Course time · {rallyGatesCleared}/10 gates</dt>
+                  <dd>{duration(rallyTime)}</dd>
+                </div>
+              )}
+              {isFirefighting && (
+                <div>
+                  <dt>Containment time · {hotspotsDoused}/{totalHotspots} doused</dt>
+                  <dd>{duration(sim.elapsed)}</dd>
+                </div>
+              )}
+              {isDustOff && (
+                <div>
+                  <dt>Turf race margin</dt>
+                  <dd>
+                    {result.coverage >= sim.rivalCoverage ? '+' : ''}
+                    {(result.coverage - sim.rivalCoverage).toFixed(1)}%
+                  </dd>
+                </div>
+              )}
+              {isTandem && (
+                <div>
+                  <dt>Echelon slipstream time</dt>
+                  <dd>{formationSecs}s</dd>
+                </div>
+              )}
               {Boolean(sim.pendingSkillBonus) && (
                 <div className="stunt-bonus">
                   <dt>Flight skill &amp; token bonuses</dt>
@@ -421,10 +551,12 @@ export function FlightDebrief({
                   <dd>+{money(result.speedBonus)}</dd>
                 </div>
               )}
-              <div className={result.penalty ? 'deduction' : ''}>
-                <dt>Overspray · {result.oversprayAcres.toFixed(2)} ac</dt>
-                <dd>−{money(result.penalty)}</dd>
-              </div>
+              {!isRally && !isFirefighting && (
+                <div className={result.penalty ? 'deduction' : ''}>
+                  <dt>Overspray · {result.oversprayAcres.toFixed(2)} ac</dt>
+                  <dd>−{money(result.penalty)}</dd>
+                </div>
+              )}
               <div className="deduction">
                 <dt>Maintenance</dt>
                 <dd>−{money(result.maintenance ?? 0)}</dd>
@@ -472,7 +604,7 @@ export function FlightDebrief({
           <Crosshair size={18} />
           <span>
             <b>For your next pass</b>
-            {debriefTip(sim)}
+            {modeTip}
           </span>
         </p>
         <NextChallenge flights={sim.career.flights} />

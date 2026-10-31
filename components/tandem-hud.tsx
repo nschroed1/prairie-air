@@ -9,7 +9,7 @@ export function TandemHud({ sim }: { sim: any }) {
   const state = getTandemState(sim);
 
   return (
-    <div className="pointer-events-none fixed top-16 left-1/2 -translate-x-1/2 flex flex-col items-center gap-2 z-30 min-w-[340px] max-w-[92vw]">
+    <div className="pointer-events-none fixed top-[98px] left-1/2 -translate-x-1/2 flex flex-col items-center gap-2 z-[15] min-w-[340px] max-w-[92vw]">
       <div className="bg-neutral-950/85 border border-sky-500/40 backdrop-blur-md px-4 py-2.5 rounded-xl shadow-2xl flex flex-col items-center w-full">
         {/* Header */}
         <div className="flex items-center justify-between w-full text-xs font-mono font-bold tracking-wider mb-1">

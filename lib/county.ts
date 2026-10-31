@@ -346,6 +346,10 @@ export function validateCommand(value: unknown): CountyCommand {
       step.dt > 0.05 ||
       !step.input ||
       (step.input.acro !== undefined && typeof step.input.acro !== 'boolean') ||
+      (step.input.rudderLeft !== undefined &&
+        typeof step.input.rudderLeft !== 'boolean') ||
+      (step.input.rudderRight !== undefined &&
+        typeof step.input.rudderRight !== 'boolean') ||
       keys.some((k) => typeof step.input[k] !== 'boolean')
     )
       throw new Error('Invalid flight controls.');
@@ -362,6 +366,7 @@ export function validateCommand(value: unknown): CountyCommand {
   if (
     data.action === 'rename' &&
     (typeof data.callsign !== 'string' ||
+      data.callsign.trim().length < 3 ||
       !/^[a-zA-Z0-9 _-]{3,20}$/.test(data.callsign))
   )
     throw new Error('Use 3–20 letters, numbers, spaces, or dashes.');
@@ -376,7 +381,12 @@ export function runFlight(
   if (duration > availableTime + 0.001)
     throw new Error('Flight clock is ahead of the server.');
   const sim = hydrate(state);
-  for (const step of steps) sim.step(step.dt, step.input);
+  for (const step of steps)
+    sim.step(step.dt, {
+      ...step.input,
+      rudderLeft: Boolean(step.input.rudderLeft),
+      rudderRight: Boolean(step.input.rudderRight),
+    });
   return { sim, remaining: Math.max(0, availableTime - duration) };
 }
 export type PublicPilot = {

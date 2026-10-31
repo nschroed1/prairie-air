@@ -129,7 +129,7 @@ export function FirefightingHud({
     <div
       style={{
         position: 'absolute',
-        top: '12px',
+        top: '98px',
         left: '50%',
         transform: 'translateX(-50%)',
         background:
@@ -141,7 +141,7 @@ export function FirefightingHud({
         display: 'flex',
         flexDirection: 'column',
         gap: '7px',
-        zIndex: 20,
+        zIndex: 15,
         minWidth: '370px',
         maxWidth: '92vw',
         boxShadow:

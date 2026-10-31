@@ -155,6 +155,7 @@ export class CountyService {
       );
     let sim = hydrate(JSON.parse(p.state) as FlightState),
       active = p.active_job;
+    const oldActive = active;
     let credit = Math.min(
       2,
       Math.max(0, (now - p.updated_at) / 1000) + p.credit,
@@ -168,7 +169,6 @@ export class CountyService {
       active = null;
       credit = 0.15;
     }
-    const oldActive = active;
     let claim: ClaimRow | null = null;
     if (active !== null) {
       claim = await this.store.claim(active);

@@ -999,6 +999,7 @@ export class FirefightingWorld {
     attachVariableParticleShader(mat);
 
     this.firePoints = new T.Points(geo, mat);
+    this.firePoints.frustumCulled = false;
     this.group.add(this.firePoints);
   }
 
@@ -1024,6 +1025,7 @@ export class FirefightingWorld {
     });
 
     this.emberPoints = new T.Points(geo, mat);
+    this.emberPoints.frustumCulled = false;
     this.group.add(this.emberPoints);
   }
 
@@ -1097,6 +1099,7 @@ export class FirefightingWorld {
     attachVariableParticleShader(mat);
 
     this.smokePoints = new T.Points(geo, mat);
+    this.smokePoints.frustumCulled = false;
     this.group.add(this.smokePoints);
   }
 
@@ -1131,6 +1134,7 @@ export class FirefightingWorld {
     attachVariableParticleShader(mat);
 
     this.steamPoints = new T.Points(geo, mat);
+    this.steamPoints.frustumCulled = false;
     this.group.add(this.steamPoints);
   }
 
@@ -1601,7 +1605,9 @@ export class FirefightingWorld {
     ]) {
       if (mesh) {
         mesh.geometry.dispose();
-        (mesh.material as T.Material).dispose();
+        const mat = mesh.material as T.MeshBasicMaterial;
+        mat.map?.dispose();
+        mat.dispose();
         this.group.remove(mesh);
       }
     }

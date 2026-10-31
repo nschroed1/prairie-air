@@ -460,7 +460,7 @@
 /* In-Flight Floating Toast Notification */
 .achievement-toast-container {
   position: fixed;
-  top: 64px;
+  top: 104px;
   right: 20px;
   z-index: 100;
   display: flex;
